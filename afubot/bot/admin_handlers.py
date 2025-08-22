@@ -8,10 +8,9 @@ from telegram.ext import (
     filters,
     ConversationHandler,
 )
-from config import ADMIN_USER_IDS
 
+import config
 import database
-
 logger = logging.getLogger(__name__)
 
 # --- 对话状态定义 ---
@@ -21,7 +20,7 @@ GETTING_AGENT_NAME, GETTING_BOT_TOKEN, GETTING_REG_LINK, GETTING_CHANNEL_LINK, G
 
 # --- 权限检查 ---
 def is_admin(update: Update) -> bool:
-    return update.effective_user.id in ADMIN_USER_IDS
+    return update.effective_user.id in config.ADMIN_USER_IDS
 
 
 # --- 管理员指令 ---
