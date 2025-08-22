@@ -14,7 +14,7 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-PROBABILITY_PER_MINUTE = 50 / (24 * 60)
+PROBABILITY_PER_MINUTE =30 / (24 * 60)
 GRID_SIZE = 6
 TOTAL_CELLS = GRID_SIZE * GRID_SIZE
 STAR_EMOJI = "⭐️"
@@ -31,20 +31,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def generate_signal_message() -> str:
-    # ... 此函数不变 ...
-    pass
+    """生成一条完整的信号消息"""
+    mines_count = random.randint(3, 6)
+    attempts_count = random.randint(4, 8)
+
+    grid = [STAR_EMOJI] * attempts_count + [SQUARE_EMOJI] * (TOTAL_CELLS - attempts_count)
+    random.shuffle(grid)
+
+    grid_text = ""
+    for i, emoji in enumerate(grid):
+        grid_text += emoji
+        if (i + 1) % GRID_SIZE == 0:
+            grid_text += "\n"
+
+    signal_text = (
+        f"确认入场！\n"
+        f"地雷数：{mines_count}\n"
+        f"尝试数：{attempts_count}\n"
+        f"有效时间：5分钟\n\n"
+        f"立即游戏 (www.baidu.com)\n\n"
+        f"{grid_text}"
+    )
+    return signal_text
 
 
-# --- 倒计时消息的回调函数 ---
+# --- 新增：倒计时消息的回调函数 ---
+
 async def send_5_min_warning(context: ContextTypes.DEFAULT_TYPE):
+    """发送 5 分钟剩余提示"""
     await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎还剩5分钟💎💎💎")
 
 
 async def send_3_min_warning(context: ContextTypes.DEFAULT_TYPE):
+    """发送 3 分钟剩余提示"""
     await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎还剩3分钟💎💎💎")
 
 
 async def send_1_min_warning(context: ContextTypes.DEFAULT_TYPE):
+    """发送 1 分钟剩余提示"""
     await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎还剩1分钟💎💎💎")
 
 
@@ -96,14 +120,15 @@ async def schedule_checker(context: ContextTypes.DEFAULT_TYPE):
     if random.random() < PROBABILITY_PER_MINUTE:
         asyncio.create_task(send_signal(context))
 
+
 async def test_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理 /testsignal 命令，立即发送一条信号用于测试"""
-    await update.message.reply_text("好的，正在发送一条包含完整倒计时的测试信号到目标频道/群组...")
+    """处理 /testsignal 命令，用于测试（同样会遵守锁机制）"""
+    await update.message.reply_text("好的，正在尝试发送一条测试信号（如果当前无信号正在进行）...")
     asyncio.create_task(send_signal(context))
     logger.info(f"收到测试指令，由用户 {update.effective_user.id} 触发。")
 
 
-# --- 核心启动与关闭逻辑 ---
+# --- 核心启动与关闭逻辑 (不变) ---
 async def startup():
     logger.info("机器人启动中...")
 
