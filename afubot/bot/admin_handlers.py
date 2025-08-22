@@ -9,7 +9,8 @@ from telegram.ext import (
     ConversationHandler,
 )
 from afubot.config import ADMIN_USER_IDS
-import database
+
+from afubot import database
 
 logger = logging.getLogger(__name__)
 
