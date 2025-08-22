@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, ApplicationBuilder, Callba
 # --- 1. 从项目中导入所有需要的函数 (已清理和统一) ---
 import config
 import database
-from bot.admin_handlers import (
+from admin_handlers import (
     add_bot_handler,
     start_admin,
     list_bots,
@@ -16,7 +16,7 @@ from bot.admin_handlers import (
     delete_bot_execute,
     delete_bot_cancel
 )
-from bot.handlers import conversation_handler
+from handlers import conversation_handler
 
 # --- 2. 日志配置 ---
 logging.basicConfig(
