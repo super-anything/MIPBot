@@ -1,5 +1,5 @@
 import logging
-import html  # <--- 使用Python内置的html库
+import html
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     CommandHandler,
@@ -14,8 +14,9 @@ import database
 logger = logging.getLogger(__name__)
 
 # --- 对话状态定义 ---
-GETTING_AGENT_NAME, GETTING_BOT_TOKEN, GETTING_REG_LINK, GETTING_CHANNEL_LINK, GETTING_VIDEO_URL, GETTING_PREDICTION_LINK, GETTING_IMAGE_URL = range(
-    10, 17)
+# 移除了 GETTING_CHANNEL_LINK
+GETTING_AGENT_NAME, GETTING_BOT_TOKEN, GETTING_REG_LINK, GETTING_VIDEO_URL, GETTING_PREDICTION_LINK, GETTING_IMAGE_URL = range(
+    10, 16)
 
 
 # --- 权限检查 ---
@@ -57,10 +58,10 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for bot in all_bots:
         run_status = "✅ 在线" if bot['bot_token'] in running_tokens else "❌ 离线"
 
-        # --- 关键修改：使用 html.escape 代替之前的 escape_html ---
         agent_name = html.escape(bot['agent_name'])
         reg_link = html.escape(bot['registration_link'])
-        channel_link = html.escape(bot['channel_link'])
+        # 频道链接现在可能不存在，这里可以移除或标记
+        channel_link = html.escape(bot.get('channel_link', '已移除'))
         video_url = html.escape(bot['video_url'] or '未配置')
         image_url = html.escape(bot['image_url'] or '未配置')
         pred_link = html.escape(bot['prediction_bot_link'] or '未配置')
@@ -70,7 +71,6 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>代理:</b> {agent_name}\n"
             f"<b>状态:</b> {run_status}\n"
             f"<b>注册链接:</b> {reg_link}\n"
-            f"<b>频道链接:</b> {channel_link}\n"
             f"<b>欢迎视频URL:</b> {video_url}\n"
             f"<b>付款图片URL:</b> {image_url}\n"
             f"<b>预测机器人链接:</b> {pred_link}\n"
@@ -81,11 +81,6 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("".join(message_parts), parse_mode='HTML')
 
-
-#
-# ... 此文件其余所有函数 (addbot流程, delbot流程等) 保持不变 ...
-# (为了简洁，这里省略了它们的代码，您只需替换整个文件即可)
-#
 
 # --- 添加机器人流程 ---
 async def start_add_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -111,60 +106,35 @@ async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def get_reg_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_input = update.message.text
-    if user_input.lower() in ["跳过", "skip"]:
-        await update.message.reply_text("❌ 此链接为必填项，不能跳过。请重新输入。")
-        return GETTING_REG_LINK
-    if not (user_input.lower().startswith(('http://', 'https://')) or user_input.lower().startswith('www.')):
-        await update.message.reply_text("❌ 链接格式不正确，应以 http://, https:// 或 www. 开头。请重新输入。")
-        return GETTING_REG_LINK
-
-    context.user_data['reg_link'] = user_input
-    await update.message.reply_text("注册链接已收到。\n现在，请把机器人需要推广的【电报频道链接】发给我。")
-    return GETTING_CHANNEL_LINK
-
-
-async def get_channel_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_input = update.message.text
-    if user_input.lower() in ["跳过", "skip"]:
-        await update.message.reply_text("❌ 此链接为必填项，不能跳过。请重新输入。")
-        return GETTING_CHANNEL_LINK
-    if not (user_input.lower().startswith(('http://', 'https://')) or user_input.lower().startswith(
-            'www.') or user_input.lower().startswith('t.me')):
-        await update.message.reply_text("❌ 链接格式不正确，应为网址或 t.me 链接。请重新输入。")
-        return GETTING_CHANNEL_LINK
-
-    context.user_data['channel_link'] = user_input
+    context.user_data['reg_link'] = update.message.text
+    # 删除了 GETTING_CHANNEL_LINK，直接跳到 GETTING_VIDEO_URL
     await update.message.reply_text(
-        "频道链接已收到。\n下一步，请把欢迎视频的【公开URL链接】发给我。\n\n如果不需要，请直接回复 `跳过`")
+        "注册链接已收到。\n下一步，请把欢迎视频的【公开URL链接】发给我。\n\n如果不需要，请直接回复 `跳过`")
     return GETTING_VIDEO_URL
+
+
+# get_channel_link 函数已被移除
 
 
 async def get_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     url_input = update.message.text
     if url_input.lower() in ["跳过", "skip"]:
         context.user_data['video_url'] = None
-        await update.message.reply_text("好的，已跳过欢迎视频配置。\n现在，请输入【预测机器人的链接】。")
+        await update.message.reply_text("好的，已跳过欢迎视频配置。\n现在，请输入【带单频道链接】。")
     else:
         context.user_data['video_url'] = url_input
-        await update.message.reply_text("视频URL已收到。\n现在，请输入【预测机器人的链接】。")
+        await update.message.reply_text("视频URL已收到。\n现在，请输入【带单频道链接】。")
 
     return GETTING_PREDICTION_LINK
 
 
+# --- 关键修改：移除了所有输入验证 ---
 async def get_prediction_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_input = update.message.text
-    if user_input.lower() in ["跳过", "skip"]:
-        await update.message.reply_text("❌ 此链接为必填项，不能跳过。请重新输入。")
-        return GETTING_PREDICTION_LINK
-    if not (user_input.lower().startswith(('http://', 'https://')) or user_input.lower().startswith(
-            'www.') or user_input.lower().startswith('t.me')):
-        await update.message.reply_text("❌ 链接格式不正确，应为网址或 t.me 链接。请重新输入。")
-        return GETTING_PREDICTION_LINK
-
-    context.user_data['prediction_bot_link'] = user_input
+    # 移除了所有验证，直接接受用户输入的任何文本
+    context.user_data['prediction_bot_link'] = update.message.text
     await update.message.reply_text(
         "预测机器人链接已收到。\n最后，请把用于提示用户充值的【图片的公开URL链接】发给我。\n\n如果不需要，请回复 `跳过`。")
+
     return GETTING_IMAGE_URL
 
 
@@ -180,9 +150,10 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
     name = context.user_data['agent_name']
     token = context.user_data['bot_token']
     reg_link = context.user_data['reg_link']
-    channel_link = context.user_data['channel_link']
     video_url = context.user_data['video_url']
     prediction_bot_link = context.user_data['prediction_bot_link']
+    # 频道链接现在设置为 None 或空字符串，取决于数据库设计
+    channel_link = None  # 或者 ""
 
     await update.message.reply_text("正在保存所有配置并尝试启动机器人...")
     new_bot_config = database.add_bot(name, token, reg_link, channel_link, video_url, image_url, prediction_bot_link)
@@ -216,7 +187,7 @@ add_bot_handler = ConversationHandler(
         GETTING_AGENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_agent_name)],
         GETTING_BOT_TOKEN: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bot_token)],
         GETTING_REG_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reg_link)],
-        GETTING_CHANNEL_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_channel_link)],
+        # 移除了 GETTING_CHANNEL_LINK 的处理器
         GETTING_VIDEO_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_url_and_save)],
         GETTING_PREDICTION_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_prediction_link)],
         GETTING_IMAGE_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_image_url_and_save)],
@@ -225,7 +196,7 @@ add_bot_handler = ConversationHandler(
 )
 
 
-# --- 删除机器人流程 ---
+# --- 删除机器人流程 (保持不变) ---
 async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update): return
     all_bots = database.get_all_bots()

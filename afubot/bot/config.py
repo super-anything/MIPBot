@@ -14,19 +14,16 @@ ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN")
 # 将你和运营团队成员的Telegram User ID加到这里（必须是数字）
 # 示例: ADMIN_USER_IDS = [12345678, 98765432]
 ADMIN_USER_IDS = [
-    8082148171,8064152515 # 替换成你的 User ID
+    8082148171,8064152515,6425667576 # 替换成你的 User ID
 ]
 
-REGISTRATION_LINK = [
-        "www.baidu.com"#注册链接
-    ]
 
 IMAGE_LIBRARY = {
     'find_id': [
         "https://storage.googleapis.com/axibot/dan/login.jpg"  # 引导图链接
     ],
     'deposit_guide': [
-        "https://storage.googleapis.com/axibot/fbot/deposti.mp4"  # 引导视频链接
+        "https://storage.googleapis.com/axibot/fbot/depodit2.mp4"  # 引导视频链接
     ]
 }
 

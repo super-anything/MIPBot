@@ -21,7 +21,7 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-PROBABILITY_PER_MINUTE =1500 / (24 * 60)
+PROBABILITY_PER_MINUTE = 1500 / (24 * 60)
 GRID_SIZE_U = 6
 GRID_SIZE_D = 5
 TOTAL_CELLS = GRID_SIZE_U * GRID_SIZE_D
@@ -34,7 +34,7 @@ SQUARE_EMOJI = "🟦"
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /start 命令"""
     await update.message.reply_text(
-        "我破解了这款Mines 游戏，结果预测准确率在97% 以上。\n准备好了吗？跟上我的脚步吧！"
+        "Maine is Mines game ko hack kar liya hai, aur iska prediction accuracy 97% se zyada hai. Are you ready? Just follow my lead!"
     )
 
 
@@ -53,11 +53,11 @@ def generate_signal_message() -> str:
             grid_text += "\n"
 
     signal_text = (
-        f"确认入场！\n"
-        f"地雷数：{mines_count}\n"
-        f"尝试数：{attempts_count}\n"
-        f"有效时间：5分钟\n\n"
-        f"立即游戏 (www.baidu.com)\n\n"
+        f"Entry Confirmed!\n"
+        f"Mines Count: {mines_count}\n"
+        f"Attempts: {attempts_count}\n"
+        f"Valid for: 5 minutes\n\n"
+        f"Play https://u7777.com/?dl=28ncss\n\n"
         f"{grid_text}"
     )
     return signal_text
@@ -67,22 +67,22 @@ def generate_signal_message() -> str:
 
 async def send_5_min_warning(context: ContextTypes.DEFAULT_TYPE):
     """发送 5 分钟剩余提示"""
-    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎还剩5分钟💎💎💎")
+    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎 Only 5 minutes left 💎💎💎")
 
 
 async def send_3_min_warning(context: ContextTypes.DEFAULT_TYPE):
     """发送 3 分钟剩余提示"""
-    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎还剩3分钟💎💎💎")
+    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎 Only 3 minutes left 💎💎💎")
 
 
 async def send_1_min_warning(context: ContextTypes.DEFAULT_TYPE):
     """发送 1 分钟剩余提示"""
-    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎还剩1分钟💎💎💎")
+    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="💎💎💎 Only 1 minute left 💎💎💎")
 
 
 async def send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     """发送最终成功消息，并解锁信号"""
-    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="✅ ✅ ✅ 避雷成功啦 ✅ ✅ ✅")
+    await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="✅ ✅ ✅ Mine-Clearing Successful! ✅ ✅ ✅")
     # --- 关键修改：解锁信号 ---
     context.bot_data['is_signal_active'] = False
     logger.info("信号已结束，锁已解除。")
@@ -110,7 +110,7 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE):
             # 从config中随机选择一张图片
             image_url = random.choice(config.IMAGE_LIBRARY['firstdd'])
             # 您可以自定义这里的文案
-            caption_text = "\n✨ 现在，就跟随我的脚步，踏入这场全新的游戏冒险！\n凭借前沿智能技术，它将带来前所未有的激情与挑战。\n\n🎮 准备好了吗？Mines 游戏即将为你开启全新的感官旅程.\n只需轻松几步，就能快速上手，畅享刺激爽快、惊喜不断的娱乐体验！"
+            caption_text = "\n✨ Abhi, meri lead follow karo, aur is naye game adventure mein enter karo! Cutting-edge smart tech ke saath, yeh anokha thrill aur challenge layega.\n\n🎮 Are you ready? Mines game aapke liye ek naya sensory journey shuru karne wala hai. Bas kuch easy steps se, aap quickly start kar sakte hain, aur exciting aur surprise-filled entertainment enjoy kar sakte hain!"
 
             try:
                 await context.bot.send_photo(
@@ -130,7 +130,7 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['is_signal_active'] = True
         logger.info("信号锁已激活，准备发送新信号...")
 
-        await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="正在检查新的信号。")
+        await context.bot.send_message(chat_id=config.TARGET_CHAT_ID, text="Checking for a new signal...")
 
         await asyncio.sleep(random.uniform(3, 5))
 
@@ -160,7 +160,7 @@ async def schedule_checker(context: ContextTypes.DEFAULT_TYPE):
 
 async def test_signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /testsignal 命令，用于测试（同样会遵守锁机制）"""
-    await update.message.reply_text("好的，正在尝试发送一条测试信号（如果当前无信号正在进行）...")
+    await update.message.reply_text("Okay, trying to send a test signal (if no signal is currently in progress)...")
     asyncio.create_task(send_signal(context))
     logger.info(f"收到测试指令，由用户 {update.effective_user.id} 触发。")
 
