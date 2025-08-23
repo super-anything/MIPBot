@@ -7,6 +7,13 @@ from telegram.ext import Application, CommandHandler, ContextTypes, ApplicationB
 
 import config
 
+# --- 新增的调试代码 ---
+print("--- STARTUP DEBUG INFO ---")
+# 打印部分Token以确认是否加载，但不要打印完整Token
+print(f"Bot Token Loaded: {bool(config.BOT_TOKEN)} (Starts with: {str(config.BOT_TOKEN)[:15]}...)")
+print(f"Target Chat ID Loaded: {config.TARGET_CHAT_ID}")
+print("--------------------------")
+
 # --- 日志和常量配置 (不变) ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO

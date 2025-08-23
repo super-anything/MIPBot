@@ -28,6 +28,5 @@ IMAGE_LIBRARY = {
     ]
 }
 
-
 if not BOT_TOKEN or not TARGET_CHAT_ID:
     raise ValueError("请在 .env 文件中正确设置 SIGNAL_BOT_TOKEN 和 TARGET_CHAT_ID")
