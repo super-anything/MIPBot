@@ -4,8 +4,10 @@ import random
 import re
 import time
 import config
+import database
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
+from telegram.error import RetryAfter, TimedOut, NetworkError
 from telegram.ext import (
     ContextTypes,
     CommandHandler,
@@ -28,17 +30,26 @@ SEND_RETRY_BACKOFF_SECONDS = 0.8
 
 
 async def _retry_send(send_coro_factory):
-    """对发送动作进行有限次重试。"""
+    """对发送动作进行有限次重试，并优先遵循 Telegram 的 Retry-After。"""
     last_exc = None
     for attempt in range(1, SEND_RETRY_ATTEMPTS + 2):  # 初次 + 重试次数
         try:
             return await send_coro_factory()
+        except RetryAfter as exc:  # 遵循服务端节流建议
+            wait_secs = float(getattr(exc, 'retry_after', 1)) + random.uniform(0.3, 0.9)
+            await asyncio.sleep(wait_secs)
+            last_exc = exc
+        except (TimedOut, NetworkError) as exc:
+            backoff = min(2.0 ** attempt * 0.3, 3.0) + random.uniform(0.1, 0.4)
+            await asyncio.sleep(backoff)
+            last_exc = exc
         except Exception as exc:  # 需要兜底所有发送异常
             last_exc = exc
             if attempt <= SEND_RETRY_ATTEMPTS:
                 await asyncio.sleep(SEND_RETRY_BACKOFF_SECONDS * attempt)
             else:
                 raise last_exc
+    raise last_exc
 
 
 def _get_fileid_cache(context: ContextTypes.DEFAULT_TYPE):
@@ -74,6 +85,7 @@ async def send_video_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url
             cache[url] = message.video.file_id
     except Exception:
         pass
+    return message
 
 
 async def send_photo_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url, caption=None):
@@ -101,14 +113,22 @@ async def send_photo_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url
             cache[url] = message.photo[-1].file_id
     except Exception:
         pass
+    return message
 
 
 # --- 人性化发送辅助 ---
-def _estimate_typing_seconds(text: str) -> float:
+def _estimate_typing_seconds_fast(text: str) -> float:
     length = len(text or "")
-    base = max(0.0, length / random.uniform(16.0, 22.0))
-    jitter = random.uniform(0.2, 0.6)
-    return max(0.4, min(2.2, base + jitter))
+    base = max(0.0, length / random.uniform(28.0, 36.0))
+    jitter = random.uniform(0.05, 0.2)
+    return max(0.15, min(0.45, base + jitter))
+
+
+def _estimate_typing_seconds_slow(text: str) -> float:
+    length = len(text or "")
+    base = max(0.0, length / random.uniform(14.0, 20.0))
+    jitter = random.uniform(0.3, 0.7)
+    return max(0.8, min(1.8, base + jitter)) + 1.0
 
 
 async def indicate_action(context: ContextTypes.DEFAULT_TYPE, chat_id, action: ChatAction, seconds: float | None = None):
@@ -121,7 +141,13 @@ async def indicate_action(context: ContextTypes.DEFAULT_TYPE, chat_id, action: C
 
 
 async def human_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id, text: str, parse_mode: str | None = None):
-    await indicate_action(context, chat_id, ChatAction.TYPING, _estimate_typing_seconds(text))
+    # 首条消息：快速；其后：更长的拟人延时
+    if not context.user_data.get('first_text_sent'):
+        seconds = _estimate_typing_seconds_fast(text)
+        context.user_data['first_text_sent'] = True
+    else:
+        seconds = _estimate_typing_seconds_slow(text)
+    await indicate_action(context, chat_id, ChatAction.TYPING, seconds)
     return await _retry_send(lambda: context.bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode))
 
 # --- 定时提醒函数 ---
@@ -162,16 +188,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     hour = time.localtime().tm_hour
     greeting = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
 
-    # 1. 发送欢迎视频 (如果配置了) —— 使用缓存与重试
-    video_url = bot_config.get('video_url')
-    if video_url:
-        try:
-            await indicate_action(context, chat_id, ChatAction.UPLOAD_VIDEO, random.uniform(0.6, 1.2))
-            await send_video_with_cache(context, chat_id, video_url)
-        except Exception as e:
-            logger.error(f"Failed to send video from URL (URL: {video_url}): {e}")
-
-    # 2. 更自然中文文案
+    # 1. 立即先发首条文本
     welcome_text = f"{greeting}, {user_name}! Aapka support ke liye shukriya. Maine yahan ek chhota exclusive space banaya hai jahan hum aur closely connect kar sakte hain."
     await human_send_message(context, chat_id, welcome_text)
 
@@ -188,11 +205,53 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     registration_link = bot_config.get('registration_link', 'Registration link not configured')
     await human_send_message(context, chat_id, f"Step 1: Mere exclusive link se register karo 👇\n{registration_link}")
 
+    # 4. 将媒体发送放到后台，不阻塞文本到达
+    video_url = bot_config.get('video_url')
+    video_file_id = bot_config.get('video_file_id')
+    if video_url:
+        async def _bg_send_video():
+            try:
+                await indicate_action(context, chat_id, ChatAction.UPLOAD_VIDEO, random.uniform(0.4, 0.8))
+                if video_file_id:
+                    # 优先用持久化 file_id
+                    msg = await _retry_send(lambda: context.bot.send_video(chat_id=chat_id, video=video_file_id))
+                else:
+                    msg = await send_video_with_cache(context, chat_id, video_url)
+                    # 首次成功后持久化
+                    try:
+                        fid = getattr(getattr(msg, 'video', None), 'file_id', None)
+                        if fid:
+                            database.update_bot_file_ids(bot_config['bot_token'], video_file_id=fid)
+                            bot_config['video_file_id'] = fid
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"Failed to send video from URL (URL: {video_url}): {e}")
+        asyncio.create_task(_bg_send_video())
+
     try:
         # 从配置中随机选择一张引导图
         find_id_image_url = random.choice(config.IMAGE_LIBRARY['find_id'])
-        await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.6, 1.2))
-        await send_photo_with_cache(context, chat_id, find_id_image_url, caption="Registration ke baad, is image ko follow karke apna 9-digit ID dhoondo.")
+        image_file_id = bot_config.get('image_file_id')
+        async def _bg_send_photo():
+            try:
+                await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.4, 0.8))
+                if image_file_id:
+                    msg = await _retry_send(lambda: context.bot.send_photo(chat_id=chat_id, photo=image_file_id, caption="Registration ke baad, is image ko follow karke apna 9-digit ID dhoondo."))
+                else:
+                    msg = await send_photo_with_cache(context, chat_id, find_id_image_url, caption="Registration ke baad, is image ko follow karke apna 9-digit ID dhoondo.")
+                    try:
+                        pid = None
+                        if getattr(msg, 'photo', None):
+                            pid = msg.photo[-1].file_id
+                        if pid:
+                            database.update_bot_file_ids(bot_config['bot_token'], image_file_id=pid)
+                            bot_config['image_file_id'] = pid
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning(f"Failed to send 'find_id' image, please check config.py configuration: {e}")
+        asyncio.create_task(_bg_send_photo())
     except (KeyError, IndexError, TypeError) as e:
         logger.warning(f"无法发送'find_id'图片，请检查config.py配置: {e}")
 
@@ -205,6 +264,7 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理并验证用户发送的ID"""
     user_id_input = update.message.text
     chat_id = update.message.chat_id
+    bot_config = context.bot_data.get('config', {})
 
     if not re.match(r'^\d{9}$', user_id_input):
         await _retry_send(lambda: update.message.reply_text("Ye 9-digit ID nahi lag raha. Fikr mat karo, sahi 9-digit ID bhej do bas."))
@@ -215,7 +275,18 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         # --- 关键修改：直接从导入的config模块读取 ---
         deposit_video_url = random.choice(config.IMAGE_LIBRARY['deposit_guide'])
-        await send_video_with_cache(context, chat_id, deposit_video_url, caption="Is video me safe aur fast recharge ka tareeqa dikhaya gaya hai.")
+        deposit_file_id = bot_config.get('deposit_file_id')
+        if deposit_file_id:
+            await _retry_send(lambda: context.bot.send_video(chat_id=chat_id, video=deposit_file_id, caption="Is video me safe aur fast recharge ka tareeqa dikhaya gaya hai."))
+        else:
+            msg = await send_video_with_cache(context, chat_id, deposit_video_url, caption="Is video me safe aur fast recharge ka tareeqa dikhaya gaya hai.")
+            try:
+                fid = getattr(getattr(msg, 'video', None), 'file_id', None)
+                if fid:
+                    database.update_bot_file_ids(bot_config['bot_token'], deposit_file_id=fid)
+                    bot_config['deposit_file_id'] = fid
+            except Exception:
+                pass
     except (KeyError, IndexError, TypeError) as e:
         logger.warning(f"Failed to send 'deposit_guide' video, please check config.py configuration: {e}")
 

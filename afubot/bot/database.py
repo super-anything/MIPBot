@@ -33,6 +33,22 @@ def initialize_db():
                        );
                        """)
         print("表 'bots' 创建完成。")
+    else:
+        # --- 迁移：为媒体 file_id 增加列（若不存在） ---
+        cursor.execute("PRAGMA table_info('bots');")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        # 期望新增的列
+        add_columns_sql = []
+        if 'video_file_id' not in existing_cols:
+            add_columns_sql.append("ALTER TABLE bots ADD COLUMN video_file_id TEXT")
+        if 'image_file_id' not in existing_cols:
+            add_columns_sql.append("ALTER TABLE bots ADD COLUMN image_file_id TEXT")
+        if 'deposit_file_id' not in existing_cols:
+            add_columns_sql.append("ALTER TABLE bots ADD COLUMN deposit_file_id TEXT")
+        for sql in add_columns_sql:
+            cursor.execute(sql)
+        if add_columns_sql:
+            print("已为 'bots' 表添加 file_id 字段：", ', '.join(stmt.split()[-2] for stmt in add_columns_sql))
 
     # ... users 表的创建逻辑不变 ...
     conn.commit()
@@ -67,6 +83,33 @@ def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None
         return get_bot_by_id(bot_id)
     except sqlite3.IntegrityError:
         return None
+    finally:
+        conn.close()
+
+
+def update_bot_file_ids(token: str, video_file_id: str | None = None, image_file_id: str | None = None, deposit_file_id: str | None = None):
+    """按需更新某个机器人的媒体 file_id 字段。不会覆盖为 None 的字段。"""
+    conn = get_db_connection()
+    try:
+        fields = []
+        values = []
+        if video_file_id is not None:
+            fields.append("video_file_id = ?")
+            values.append(video_file_id)
+        if image_file_id is not None:
+            fields.append("image_file_id = ?")
+            values.append(image_file_id)
+        if deposit_file_id is not None:
+            fields.append("deposit_file_id = ?")
+            values.append(deposit_file_id)
+        if not fields:
+            return False
+        values.append(token)
+        sql = f"UPDATE bots SET {', '.join(fields)} WHERE bot_token = ?"
+        cur = conn.cursor()
+        cur.execute(sql, tuple(values))
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 
