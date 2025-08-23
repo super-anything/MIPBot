@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import platform
+import platform,random
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler
 

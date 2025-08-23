@@ -17,6 +17,19 @@ ADMIN_USER_IDS = [
     8082148171,8064152515 # 替换成你的 User ID
 ]
 
+REGISTRATION_LINK = [
+        "www.baidu.com"#注册链接
+    ]
+
+IMAGE_LIBRARY = {
+    'find_id': [
+        "https://storage.googleapis.com/axibot/dan/login.jpg"  # 引导图链接
+    ],
+    'deposit_guide': [
+        "https://storage.googleapis.com/axibot/fbot/deposti.mp4"  # 引导视频链接
+    ]
+}
+
 if not ADMIN_BOT_TOKEN:
     raise ValueError("请在 .env 文件中设置你的 ADMIN_BOT_TOKEN")
 

@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import random
 import re
+import config
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
@@ -140,12 +142,23 @@ async def handle_join_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_reply_markup(reply_markup=None)
     await asyncio.sleep(1)
 
-    bot_config = context.bot_data.get('config', {})
-    agent_link = bot_config.get('registration_link', '（未配置代理链接）')
+    #bot_config = context.bot_data.get('config', {})
 
+    agent_link = config.REGISTRATION_LINK
 
     await context.bot.send_message(chat_id=query.message.chat_id,
                                    text=f"非常好，接下来是第二步：点击我的专属链接注册，解锁专属的粉丝福利！\n{agent_link}")
+
+    try:
+        # 从配置中随机选择一张引导图
+        find_id_image_url = random.choice(config.IMAGE_LIBRARY['find_id'])
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=find_id_image_url,
+            caption="注册完成后，请参考上图找到您的9位数字ID。"
+        )
+    except (KeyError, IndexError, TypeError) as e:
+        logger.warning(f"无法发送'find_id'图片，请检查config.py配置: {e}")
 
     await asyncio.sleep(3)
     await context.bot.send_message(chat_id=query.message.chat_id,
@@ -166,16 +179,16 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await asyncio.sleep(1)
     await update.message.reply_text("太棒了！你已成功加入专属通道。\n只需要再充值[200] 卢比，即可立即解锁 预测机器人！")
 
-    await asyncio.sleep(1)
-    bot_config = context.bot_data.get('config', {})
-    image_file_id = bot_config.get('image_url')
-    if image_file_id:
-        try:
-            await context.bot.send_photo(chat_id=chat_id, photo=image_file_id)
-        except Exception as e:
-            logger.error(f"发送图片失败 (file_id: {image_file_id}): {e}")
-
-    await asyncio.sleep(3)
+    try:
+        # --- 关键修改：直接从导入的config模块读取 ---
+        deposit_video_url = random.choice(config.IMAGE_LIBRARY['deposit_guide'])
+        await context.bot.send_video(
+            chat_id=chat_id,
+            video=deposit_video_url,
+            caption="请观看此视频，了解如何安全快捷地完成充值。"
+        )
+    except (KeyError, IndexError, TypeError) as e:
+        logger.warning(f"无法发送'deposit_guide'视频，请检查config.py配置: {e}")
 
     keyboard = [[InlineKeyboardButton("yes", callback_data="confirm_recharge_yes")]]
     reply_markup = InlineKeyboardMarkup(keyboard)

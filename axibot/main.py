@@ -14,9 +14,10 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-PROBABILITY_PER_MINUTE =30 / (24 * 60)
-GRID_SIZE = 6
-TOTAL_CELLS = GRID_SIZE * GRID_SIZE
+PROBABILITY_PER_MINUTE =1500 / (24 * 60)
+GRID_SIZE_U = 6
+GRID_SIZE_D = 5
+TOTAL_CELLS = GRID_SIZE_U * GRID_SIZE_D
 STAR_EMOJI = "⭐️"
 SQUARE_EMOJI = "🟦"
 
@@ -41,7 +42,7 @@ def generate_signal_message() -> str:
     grid_text = ""
     for i, emoji in enumerate(grid):
         grid_text += emoji
-        if (i + 1) % GRID_SIZE == 0:
+        if (i + 1) % GRID_SIZE_U == 0:
             grid_text += "\n"
 
     signal_text = (
@@ -83,6 +84,7 @@ async def send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
 async def send_signal(context: ContextTypes.DEFAULT_TYPE):
     """
     发送完整信号流，并管理信号锁。
+    新增逻辑：每3次调用才发送一次前置图片消息。
     """
     # --- 关键修改：发送前检查锁 ---
     if context.bot_data.get('is_signal_active', False):
@@ -90,6 +92,33 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
+        # --- 关键修改：初始化并更新调用计数器 ---
+        call_count = context.bot_data.get('signal_call_count', 0) + 1
+        context.bot_data['signal_call_count'] = call_count
+        logger.info(f"信号任务被触发，这是第 {call_count} 次。")
+
+        # --- 关键修改：判断是否为第3次调用，并发送图片 ---
+        if call_count % 3 == 1:
+            logger.info("满足3次触发条件，准备发送图片消息。")
+            # 从config中随机选择一张图片
+            image_url = random.choice(config.IMAGE_LIBRARY['firstdd'])
+            # 您可以自定义这里的文案
+            caption_text = "\n✨ 现在，就跟随我的脚步，踏入这场全新的游戏冒险！\n凭借前沿智能技术，它将带来前所未有的激情与挑战。\n\n🎮 准备好了吗？Mines 游戏即将为你开启全新的感官旅程.\n只需轻松几步，就能快速上手，畅享刺激爽快、惊喜不断的娱乐体验！"
+
+            try:
+                await context.bot.send_photo(
+                    chat_id=config.TARGET_CHAT_ID,
+                    photo=image_url,
+                    caption=caption_text
+                )
+                logger.info(f"成功发送图片消息到 {config.TARGET_CHAT_ID}")
+                # 发送图片后可以稍微等待一下，让用户有时间看
+                await asyncio.sleep(random.uniform(2, 4))
+
+            except Exception as e:
+                logger.error(f"发送图片消息失败: {e}")
+                # 即使图片发送失败，我们也可以选择继续发送主信号
+
         # --- 关键修改：立即加锁 ---
         context.bot_data['is_signal_active'] = True
         logger.info("信号锁已激活，准备发送新信号...")
@@ -103,7 +132,8 @@ async def send_signal(context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"成功发送一条信号到 {config.TARGET_CHAT_ID}")
 
         job_queue = context.job_queue
-        job_queue.run_once(send_5_min_warning, 3)
+        # 倒计时时间也可以根据需要调整
+        job_queue.run_once(send_5_min_warning, 3)  # 为了测试方便，这里依然是秒
         job_queue.run_once(send_3_min_warning, 120)
         job_queue.run_once(send_1_min_warning, 240)
         # --- 关键修改：最后一个任务负责解锁 ---
