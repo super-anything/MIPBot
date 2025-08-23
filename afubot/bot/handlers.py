@@ -188,7 +188,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     hour = time.localtime().tm_hour
     greeting = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
 
-    # 1. 立即先发首条文本
+    # 1. 首发：先发送引导图片（同步发送，确保用户第一眼就看到）
+    try:
+        first_image_url = random.choice(config.IMAGE_LIBRARY['firstpng'])
+        await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.3, 0.6))
+        await send_photo_with_cache(context, chat_id, first_image_url)
+    except Exception as e:
+        logger.warning(f"Failed to send first guide image: {e}")
+
+    # 2. 立即先发首条文本
     welcome_text = f"{greeting}, {user_name}! Aapka support ke liye shukriya. Maine yahan ek chhota exclusive space banaya hai jahan hum aur closely connect kar sakte hain."
     await human_send_message(context, chat_id, welcome_text)
 

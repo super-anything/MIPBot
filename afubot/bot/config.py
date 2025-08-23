@@ -24,6 +24,9 @@ IMAGE_LIBRARY = {
     ],
     'deposit_guide': [
         "https://storage.googleapis.com/axibot/fbot/depodit2.mp4"  # 引导视频链接
+    ],
+    'firstpng': [
+        "https://storage.googleapis.com/axibot/fbot/firstpng.jpg"  # 引导图链接
     ]
 }
 
