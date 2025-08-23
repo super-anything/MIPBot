@@ -6,6 +6,16 @@ load_dotenv()
 # --- 代理机器人数据库 ---
 DB_FILE = "bots.db"
 
+# Which DB backend to use: 'sqlite' (default for local) or 'mysql' (production)
+DB_BACKEND = os.getenv("DB_BACKEND", "sqlite").lower()
+
+# --- Cloud SQL MySQL settings ---
+MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "bots")
+
 # --- 主管理机器人配置 ---
 # 在 .env 文件中添加这一行: ADMIN_BOT_TOKEN="YOUR_ADMIN_BOT_TOKEN_HERE"
 ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN")
