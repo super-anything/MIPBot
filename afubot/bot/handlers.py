@@ -2,8 +2,10 @@ import asyncio
 import logging
 import random
 import re
+import time
 import config
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ChatAction
 from telegram.ext import (
     ContextTypes,
     CommandHandler,
@@ -19,7 +21,108 @@ logger = logging.getLogger(__name__)
 AWAITING_ID, AWAITING_RECHARGE_CONFIRM = range(2)
 NAG_INTERVAL_SECONDS = 10
 MAX_NAG_ATTEMPTS = 6
-import time
+
+# --- 发送优化：重试与文件ID缓存 ---
+SEND_RETRY_ATTEMPTS = 2
+SEND_RETRY_BACKOFF_SECONDS = 0.8
+
+
+async def _retry_send(send_coro_factory):
+    """对发送动作进行有限次重试。"""
+    last_exc = None
+    for attempt in range(1, SEND_RETRY_ATTEMPTS + 2):  # 初次 + 重试次数
+        try:
+            return await send_coro_factory()
+        except Exception as exc:  # 需要兜底所有发送异常
+            last_exc = exc
+            if attempt <= SEND_RETRY_ATTEMPTS:
+                await asyncio.sleep(SEND_RETRY_BACKOFF_SECONDS * attempt)
+            else:
+                raise last_exc
+
+
+def _get_fileid_cache(context: ContextTypes.DEFAULT_TYPE):
+    cache = context.application.bot_data.get('file_id_cache')
+    if cache is None:
+        cache = {}
+        context.application.bot_data['file_id_cache'] = cache
+    return cache
+
+
+async def send_video_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url, caption=None):
+    """优先使用已缓存的 file_id 发送视频，失败则回退到 URL 并缓存。"""
+    cache = _get_fileid_cache(context)
+    cached_file_id = cache.get(url)
+
+    async def _send_with_id():
+        return await context.bot.send_video(chat_id=chat_id, video=cached_file_id, caption=caption)
+
+    async def _send_with_url():
+        return await context.bot.send_video(chat_id=chat_id, video=url, caption=caption)
+
+    message = None
+    if cached_file_id:
+        try:
+            message = await _retry_send(_send_with_id)
+        except Exception:
+            message = await _retry_send(_send_with_url)
+    else:
+        message = await _retry_send(_send_with_url)
+
+    try:
+        if getattr(message, 'video', None) and getattr(message.video, 'file_id', None):
+            cache[url] = message.video.file_id
+    except Exception:
+        pass
+
+
+async def send_photo_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url, caption=None):
+    """优先使用已缓存的 file_id 发送图片，失败则回退到 URL 并缓存。"""
+    cache = _get_fileid_cache(context)
+    cached_file_id = cache.get(url)
+
+    async def _send_with_id():
+        return await context.bot.send_photo(chat_id=chat_id, photo=cached_file_id, caption=caption)
+
+    async def _send_with_url():
+        return await context.bot.send_photo(chat_id=chat_id, photo=url, caption=caption)
+
+    message = None
+    if cached_file_id:
+        try:
+            message = await _retry_send(_send_with_id)
+        except Exception:
+            message = await _retry_send(_send_with_url)
+    else:
+        message = await _retry_send(_send_with_url)
+
+    try:
+        if getattr(message, 'photo', None):
+            cache[url] = message.photo[-1].file_id
+    except Exception:
+        pass
+
+
+# --- 人性化发送辅助 ---
+def _estimate_typing_seconds(text: str) -> float:
+    length = len(text or "")
+    base = max(0.0, length / random.uniform(16.0, 22.0))
+    jitter = random.uniform(0.2, 0.6)
+    return max(0.4, min(2.2, base + jitter))
+
+
+async def indicate_action(context: ContextTypes.DEFAULT_TYPE, chat_id, action: ChatAction, seconds: float | None = None):
+    try:
+        await _retry_send(lambda: context.bot.send_chat_action(chat_id=chat_id, action=action))
+        await asyncio.sleep(seconds if seconds is not None else random.uniform(0.5, 1.1))
+    except Exception:
+        # 忽略动作失败
+        pass
+
+
+async def human_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id, text: str, parse_mode: str | None = None):
+    await indicate_action(context, chat_id, ChatAction.TYPING, _estimate_typing_seconds(text))
+    return await _retry_send(lambda: context.bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode))
 
 # --- 定时提醒函数 ---
 
@@ -34,10 +137,9 @@ async def nag_recharge_callback(context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('recharge_nag_attempts', None)
         return
 
-    keyboard = [[InlineKeyboardButton("Yes", callback_data="confirm_recharge_yes")]]
+    keyboard = [[InlineKeyboardButton("Recharge ho gaya ✅", callback_data="confirm_recharge_yes")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await context.bot.send_message(chat_id=chat_id, text="Bhai, kya aapne recharge pura kar liya hai? Ek baar done hone par, aap turant Prediction Bot use kar sakte hain!",
-                                   reply_markup=reply_markup)
+    await _retry_send(lambda: context.bot.send_message(chat_id=chat_id, text="Bhai, recharge complete ho gaya? Ho gaya ho to niche button dabao, main turant access de deta hoon.", reply_markup=reply_markup))
 
     context.user_data['recharge_nag_attempts'] = nag_attempts + 1
     job_name = f'recharge_nag_{chat_id}_{user_id}'
@@ -55,48 +157,46 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     bot_config = context.bot_data.get('config', {})
 
-    # 1. 发送欢迎视频 (如果配置了)
+    # 0. 个性化称呼与问候
+    user_name = (update.effective_user.first_name or "dost").strip()
+    hour = time.localtime().tm_hour
+    greeting = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
+
+    # 1. 发送欢迎视频 (如果配置了) —— 使用缓存与重试
     video_url = bot_config.get('video_url')
     if video_url:
         try:
-            await context.bot.send_video(chat_id=chat_id, video=video_url)
-            await asyncio.sleep(2)
+            await indicate_action(context, chat_id, ChatAction.UPLOAD_VIDEO, random.uniform(0.6, 1.2))
+            await send_video_with_cache(context, chat_id, video_url)
         except Exception as e:
             logger.error(f"Failed to send video from URL (URL: {video_url}): {e}")
 
-    # 2. 逐步发送欢迎消息
-    await context.bot.send_message(chat_id=chat_id,
-                                   text="Hi guys, thanks for your continued support and presence. Today, I'm officially opening up a special space for you, where we can interact more closely.")
-    time.sleep(3)
-    await context.bot.send_message(chat_id=chat_id, text="This is not just a place for interaction, but also the only channel for fans' exclusive benefits.")
-    time.sleep(3)
+    # 2. 更自然中文文案
+    welcome_text = f"{greeting}, {user_name}! Aapka support ke liye shukriya. Maine yahan ek chhota exclusive space banaya hai jahan hum aur closely connect kar sakte hain."
+    await human_send_message(context, chat_id, welcome_text)
 
     benefits_text = (
-        "To thank you for your long-term support, I have prepared multiple benefits:\n 1、[An exclusive hacker bot with up to 90% accuracy],\n 2、[Cash prize drawing],\n 3、[Mobile phone prizes].\n\n Please note:\n You only have a chance to get exclusive benefits after completing these two things."
+        "Yahan pe kuch exclusive benefits ready hain:\n"
+        "1) High-accuracy prediction bot;\n"
+        "2) Cash rewards lucky draw;\n"
+        "3) Mobile giveaways.\n\n"
+        "Bas 2 simple steps complete karo, aur sab unlock ho jayega."
     )
-    await context.bot.send_message(chat_id=chat_id, text=benefits_text)
-    time.sleep(3)
+    await human_send_message(context, chat_id, benefits_text)
 
     # 3. 发送注册链接
-    registration_link = bot_config.get('registration_link', '（Registration link not configured）')
-
-    await context.bot.send_message(chat_id=chat_id,
-                                   text=f"First: Click my exclusive link to register and unlock exclusive fan benefits!\n{registration_link}")
+    registration_link = bot_config.get('registration_link', 'Registration link not configured')
+    await human_send_message(context, chat_id, f"Step 1: Mere exclusive link se register karo 👇\n{registration_link}")
 
     try:
         # 从配置中随机选择一张引导图
         find_id_image_url = random.choice(config.IMAGE_LIBRARY['find_id'])
-        await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=find_id_image_url,
-            caption="After completing the registration, please refer to the image above to find your 9-digit ID."
-        )
+        await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.6, 1.2))
+        await send_photo_with_cache(context, chat_id, find_id_image_url, caption="Registration ke baad, is image ko follow karke apna 9-digit ID dhoondo.")
     except (KeyError, IndexError, TypeError) as e:
-        logger.warning(f"Failed to send 'find_id' image, please check config.py configuration: {e}")
+        logger.warning(f"无法发送'find_id'图片，请检查config.py配置: {e}")
 
-    time.sleep(3)
-    await context.bot.send_message(chat_id=chat_id,
-                                   text="Bhai, kya aapne registration pura kar liya hai? ID bhejo mujhe, main aapke account ke liye ek backdoor khol doonga.")
+    await human_send_message(context, chat_id, "Register karne ke baad apna 9-digit ID bhej do. Main turant access open kar dunga.")
 
     return AWAITING_ID
 
@@ -107,27 +207,21 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     chat_id = update.message.chat_id
 
     if not re.match(r'^\d{9}$', user_id_input):
-        await update.message.reply_text("User ID not found, please continue to send the correct ID.")
+        await _retry_send(lambda: update.message.reply_text("Ye 9-digit ID nahi lag raha. Fikr mat karo, sahi 9-digit ID bhej do bas."))
         return AWAITING_ID
 
-    time.sleep(3)
-    await update.message.reply_text("Zabardast! Aap successfully exclusive channel mein join ho gaye hain.\nBas, [200] rupees ka ek aur recharge, aur aap turant Prediction Bot ko unlock kar sakte hain!")
+    await _retry_send(lambda: update.message.reply_text("Great! Tumhara slot reserve kar diya. Ab sirf 200 rupees recharge karo, aur prediction bot turant unlock ho jayega."))
 
     try:
         # --- 关键修改：直接从导入的config模块读取 ---
         deposit_video_url = random.choice(config.IMAGE_LIBRARY['deposit_guide'])
-        await context.bot.send_video(
-            chat_id=chat_id,
-            video=deposit_video_url,
-            caption="Please watch this video to learn how to complete the recharge safely and quickly."
-        )
+        await send_video_with_cache(context, chat_id, deposit_video_url, caption="Is video me safe aur fast recharge ka tareeqa dikhaya gaya hai.")
     except (KeyError, IndexError, TypeError) as e:
         logger.warning(f"Failed to send 'deposit_guide' video, please check config.py configuration: {e}")
 
-    keyboard = [[InlineKeyboardButton("Yes", callback_data="confirm_recharge_yes")]]
+    keyboard = [[InlineKeyboardButton("Recharge ho gaya ✅", callback_data="confirm_recharge_yes")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Bhai, kya aapne recharge pura kar liya hai? Ek baar done hone par, aap turant Prediction Bot ka use kar sakte hain!",
-                                    reply_markup=reply_markup)
+    await _retry_send(lambda: update.message.reply_text("Recharge complete ho jaye to niche button dabana, main access open kar dunga.", reply_markup=reply_markup))
 
     context.user_data['recharge_nag_attempts'] = 0
     job_name = f'recharge_nag_{chat_id}_{update.effective_user.id}'
@@ -154,23 +248,17 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop(job_name_key, None)
 
     await query.edit_message_reply_markup(reply_markup=None)
-    time.sleep(3)
-
-    await context.bot.send_message(chat_id=query.message.chat_id,
-                                   text="Second: Fantastic! I'm immediately unlocking the Prediction Bot with up to 90% accuracy for you. Get ready for a high-profit journey!")
-    time.sleep(3)
+    await human_send_message(context, query.message.chat_id, "Awesome! Ab main tumhare liye prediction bot unlock kar raha hoon (90%+ accuracy). Pehli wave ready hai!")
 
     bot_config = context.bot_data.get('config', {})
-    prediction_bot_link = bot_config.get('prediction_bot_link', '（Prediction Bot link not configured）')
+    prediction_bot_link = bot_config.get('prediction_bot_link', 'Prediction bot link not configured')
 
     final_message = (
-        "System is pushing the first batch of prediction data for you, with an accuracy of 90%+!\n"
-        "These precise predictions will bring you higher returns and continuous income,\n"
-        "The opportunity is right in front of you! Click the link below to enter the bot immediately,\n"
-        "Take a step ahead on the path to high income!\n"
+        "First set of predictions tumhare liye push ho chuka hai (90%+).\n"
+        "Zyada stable returns ke liye abhi join karo: \n"
         f"{prediction_bot_link}"
     )
-    await context.bot.send_message(chat_id=query.message.chat_id, text=final_message)
+    await human_send_message(context, query.message.chat_id, final_message)
 
     return ConversationHandler.END
 
