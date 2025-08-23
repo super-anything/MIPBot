@@ -21,7 +21,7 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-PROBABILITY_PER_MINUTE = 1500 / (24 * 60)
+PROBABILITY_PER_MINUTE = 100 / (24 * 60)
 GRID_SIZE_U = 6
 GRID_SIZE_D = 5
 TOTAL_CELLS = GRID_SIZE_U * GRID_SIZE_D
