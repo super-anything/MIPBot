@@ -34,9 +34,9 @@ async def nag_recharge_callback(context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('recharge_nag_attempts', None)
         return
 
-    keyboard = [[InlineKeyboardButton("是", callback_data="confirm_recharge_yes")]]
+    keyboard = [[InlineKeyboardButton("Yes", callback_data="confirm_recharge_yes")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await context.bot.send_message(chat_id=chat_id, text="兄弟，你完成充值了吗？一旦完成，就可以马上使用预测机器人了！",
+    await context.bot.send_message(chat_id=chat_id, text="Bhai, kya aapne recharge pura kar liya hai? Ek baar done hone par, aap turant Prediction Bot use kar sakte hain!",
                                    reply_markup=reply_markup)
 
     context.user_data['recharge_nag_attempts'] = nag_attempts + 1
@@ -60,27 +60,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if video_url:
         try:
             await context.bot.send_video(chat_id=chat_id, video=video_url)
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
         except Exception as e:
-            logger.error(f"通过URL发送视频失败 (URL: {video_url}): {e}")
+            logger.error(f"Failed to send video from URL (URL: {video_url}): {e}")
 
     # 2. 逐步发送欢迎消息
     await context.bot.send_message(chat_id=chat_id,
-                                   text="亲爱的朋友们，感谢大家一直以来的支持与陪伴。今天，我正式为大家开启一个专属空间，在这里我们能够更加紧密地互动交流。")
-    await asyncio.sleep(1)
-    await context.bot.send_message(chat_id=chat_id, text="这里不仅仅是互动的场所，更是粉丝专属福利的唯一通道。")
-    await asyncio.sleep(1)
+                                   text="Hi guys, thanks for your continued support and presence. Today, I'm officially opening up a special space for you, where we can interact more closely.")
+    await asyncio.sleep(2)
+    await context.bot.send_message(chat_id=chat_id, text="This is not just a place for interaction, but also the only channel for fans' exclusive benefits.")
+    await asyncio.sleep(2)
 
     benefits_text = (
-        "为了感谢长期以来的支持，我准备了多重福利：\n 1、[准确率高达90%的专属黑客机器人]，\n 2、[现金奖励抽取]，\n 3、[手机奖励]。\n\n 请注意：\n 只有完成以下两件事，才有机会获取专属福利")
+        "To thank you for your long-term support, I have prepared multiple benefits:\n 1、[An exclusive hacker bot with up to 90% accuracy],\n 2、[Cash prize drawing],\n 3、[Mobile phone prizes].\n\n Please note:\n You only have a chance to get exclusive benefits after completing these two things."
+    )
     await context.bot.send_message(chat_id=chat_id, text=benefits_text)
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 3. 发送注册链接
-    registration_link = bot_config.get('registration_link', '（注册链接未配置）')
+    registration_link = bot_config.get('registration_link', '（Registration link not configured）')
 
     await context.bot.send_message(chat_id=chat_id,
-                                   text=f"第一：点击我的专属链接注册，解锁专属的粉丝福利！\n{registration_link}")
+                                   text=f"First: Click my exclusive link to register and unlock exclusive fan benefits!\n{registration_link}")
 
     try:
         # 从配置中随机选择一张引导图
@@ -88,14 +89,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await context.bot.send_photo(
             chat_id=chat_id,
             photo=find_id_image_url,
-            caption="注册完成后，请参考上图找到您的9位数字ID。"
+            caption="After completing the registration, please refer to the image above to find your 9-digit ID."
         )
     except (KeyError, IndexError, TypeError) as e:
-        logger.warning(f"无法发送'find_id'图片，请检查config.py配置: {e}")
+        logger.warning(f"Failed to send 'find_id' image, please check config.py configuration: {e}")
 
     await asyncio.sleep(5)
     await context.bot.send_message(chat_id=chat_id,
-                                   text="兄弟，你完成注册了吗？ID发给我，我给你的账号开个后门。")
+                                   text="Bhai, kya aapne registration pura kar liya hai? ID bhejo mujhe, main aapke account ke liye ek backdoor khol doonga.")
 
     return AWAITING_ID
 
@@ -106,11 +107,11 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     chat_id = update.message.chat_id
 
     if not re.match(r'^\d{9}$', user_id_input):
-        await update.message.reply_text("用户id未查询到，请继续发送正确的ID。")
+        await update.message.reply_text("User ID not found, please continue to send the correct ID.")
         return AWAITING_ID
 
     await asyncio.sleep(5)
-    await update.message.reply_text("太棒了！你已成功加入专属通道。\n只需要再充值[200] 卢比，即可立即解锁 预测机器人！")
+    await update.message.reply_text("Zabardast! Aap successfully exclusive channel mein join ho gaye hain.\nBas, [200] rupees ka ek aur recharge, aur aap turant Prediction Bot ko unlock kar sakte hain!")
 
     try:
         # --- 关键修改：直接从导入的config模块读取 ---
@@ -118,14 +119,14 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await context.bot.send_video(
             chat_id=chat_id,
             video=deposit_video_url,
-            caption="请观看此视频，了解如何安全快捷地完成充值。"
+            caption="Please watch this video to learn how to complete the recharge safely and quickly."
         )
     except (KeyError, IndexError, TypeError) as e:
-        logger.warning(f"无法发送'deposit_guide'视频，请检查config.py配置: {e}")
+        logger.warning(f"Failed to send 'deposit_guide' video, please check config.py configuration: {e}")
 
-    keyboard = [[InlineKeyboardButton("是", callback_data="confirm_recharge_yes")]]
+    keyboard = [[InlineKeyboardButton("Yes", callback_data="confirm_recharge_yes")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("兄弟，你完成充值了吗？一旦完成，就可以马上使用预测机器人了！",
+    await update.message.reply_text("Bhai, kya aapne recharge pura kar liya hai? Ek baar done hone par, aap turant Prediction Bot ka use kar sakte hain!",
                                     reply_markup=reply_markup)
 
     context.user_data['recharge_nag_attempts'] = 0
@@ -156,17 +157,17 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
     await asyncio.sleep(3)
 
     await context.bot.send_message(chat_id=query.message.chat_id,
-                                   text="第二：太给力了！马上为你解锁准确率高达90%的预测机器人，准备好迎接高回报的旅程吧！")
+                                   text="Second: Fantastic! I'm immediately unlocking the Prediction Bot with up to 90% accuracy for you. Get ready for a high-profit journey!")
     await asyncio.sleep(3)
 
     bot_config = context.bot_data.get('config', {})
-    prediction_bot_link = bot_config.get('prediction_bot_link', '（预测机器人链接未配置）')
+    prediction_bot_link = bot_config.get('prediction_bot_link', '（Prediction Bot link not configured）')
 
     final_message = (
-        "系统正在为您推送第一波预测数据，准确率高达 90%+！\n"
-        "这些精准预测将为您带来 更高回报与持续收入，\n"
-        "机会就在眼前! 点击下方链接立即进入机器人，\n"
-        "抢先一步开启高收益之路!\n"
+        "System is pushing the first batch of prediction data for you, with an accuracy of 90%+!\n"
+        "These precise predictions will bring you higher returns and continuous income,\n"
+        "The opportunity is right in front of you! Click the link below to enter the bot immediately,\n"
+        "Take a step ahead on the path to high income!\n"
         f"{prediction_bot_link}"
     )
     await context.bot.send_message(chat_id=query.message.chat_id, text=final_message)
@@ -176,7 +177,7 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """取消对话"""
-    await update.message.reply_text("对话已取消。发送 /start 重新开始。")
+    await update.message.reply_text("Conversation canceled. Send /start to restart.")
     # 清理所有可能的任务
     user_id = update.effective_user.id
     job_name_key = f'recharge_nag_job_name_{user_id}'
