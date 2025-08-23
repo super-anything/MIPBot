@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 AWAITING_ID, AWAITING_RECHARGE_CONFIRM = range(2)
 NAG_INTERVAL_SECONDS = 10
 MAX_NAG_ATTEMPTS = 6
-
+import time
 
 # --- 定时提醒函数 ---
 
@@ -67,15 +67,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # 2. 逐步发送欢迎消息
     await context.bot.send_message(chat_id=chat_id,
                                    text="Hi guys, thanks for your continued support and presence. Today, I'm officially opening up a special space for you, where we can interact more closely.")
-    await asyncio.sleep(2)
+    time.sleep(3)
     await context.bot.send_message(chat_id=chat_id, text="This is not just a place for interaction, but also the only channel for fans' exclusive benefits.")
-    await asyncio.sleep(2)
+    time.sleep(3)
 
     benefits_text = (
         "To thank you for your long-term support, I have prepared multiple benefits:\n 1、[An exclusive hacker bot with up to 90% accuracy],\n 2、[Cash prize drawing],\n 3、[Mobile phone prizes].\n\n Please note:\n You only have a chance to get exclusive benefits after completing these two things."
     )
     await context.bot.send_message(chat_id=chat_id, text=benefits_text)
-    await asyncio.sleep(2)
+    time.sleep(3)
 
     # 3. 发送注册链接
     registration_link = bot_config.get('registration_link', '（Registration link not configured）')
@@ -94,7 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     except (KeyError, IndexError, TypeError) as e:
         logger.warning(f"Failed to send 'find_id' image, please check config.py configuration: {e}")
 
-    await asyncio.sleep(5)
+    time.sleep(3)
     await context.bot.send_message(chat_id=chat_id,
                                    text="Bhai, kya aapne registration pura kar liya hai? ID bhejo mujhe, main aapke account ke liye ek backdoor khol doonga.")
 
@@ -110,7 +110,7 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("User ID not found, please continue to send the correct ID.")
         return AWAITING_ID
 
-    await asyncio.sleep(5)
+    time.sleep(3)
     await update.message.reply_text("Zabardast! Aap successfully exclusive channel mein join ho gaye hain.\nBas, [200] rupees ka ek aur recharge, aur aap turant Prediction Bot ko unlock kar sakte hain!")
 
     try:
@@ -154,11 +154,11 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop(job_name_key, None)
 
     await query.edit_message_reply_markup(reply_markup=None)
-    await asyncio.sleep(3)
+    time.sleep(3)
 
     await context.bot.send_message(chat_id=query.message.chat_id,
                                    text="Second: Fantastic! I'm immediately unlocking the Prediction Bot with up to 90% accuracy for you. Get ready for a high-profit journey!")
-    await asyncio.sleep(3)
+    time.sleep(3)
 
     bot_config = context.bot_data.get('config', {})
     prediction_bot_link = bot_config.get('prediction_bot_link', '（Prediction Bot link not configured）')
