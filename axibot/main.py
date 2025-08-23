@@ -57,7 +57,7 @@ def generate_signal_message() -> str:
         f"Mines Count: {mines_count}\n"
         f"Attempts: {attempts_count}\n"
         f"Valid for: 5 minutes\n\n"
-        f"Play https://u7777.com/?dl=28ncss\n\n"
+        f"Play https://xz.u7777.net/?dl=7be9v4\n\n"
         f"{grid_text}"
     )
     return signal_text

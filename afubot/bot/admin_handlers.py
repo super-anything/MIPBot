@@ -61,7 +61,7 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
         agent_name = html.escape(bot['agent_name'])
         reg_link = html.escape(bot['registration_link'])
         # 频道链接现在可能不存在，这里可以移除或标记
-        channel_link = html.escape(bot.get('channel_link', '已移除'))
+        channel_link = html.escape(bot.get('channel_link') or'未配置')
         video_url = html.escape(bot['video_url'] or '未配置')
         image_url = html.escape(bot['image_url'] or '未配置')
         pred_link = html.escape(bot['prediction_bot_link'] or '未配置')
@@ -153,7 +153,7 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
     video_url = context.user_data['video_url']
     prediction_bot_link = context.user_data['prediction_bot_link']
     # 频道链接现在设置为 None 或空字符串，取决于数据库设计
-    channel_link = None  # 或者 ""
+    channel_link = "" # 或者
 
     await update.message.reply_text("正在保存所有配置并尝试启动机器人...")
     new_bot_config = database.add_bot(name, token, reg_link, channel_link, video_url, image_url, prediction_bot_link)
