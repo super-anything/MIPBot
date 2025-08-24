@@ -317,3 +317,50 @@ def delete_bot(token: str) -> bool:
         return False
     finally:
         conn.close()
+
+
+def delete_bot_by_id(bot_id: int) -> bool:
+    """按 id 删除机器人，并尝试清理其 users 关联（通过 token）"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                # 先取 token 以便清理 users
+                cursor.execute("SELECT bot_token FROM bots WHERE id = %s", (bot_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                token = row["bot_token"] if isinstance(row, dict) else row[0]
+
+                cursor.execute("DELETE FROM bots WHERE id = %s", (bot_id,))
+                if cursor.rowcount == 0:
+                    return False
+                try:
+                    cursor.execute("DELETE FROM users WHERE bot_token = %s", (token,))
+                except Exception:
+                    pass
+                conn.commit()
+                return True
+        else:
+            cursor = conn.cursor()
+            cursor.execute("SELECT bot_token FROM bots WHERE id = ?", (bot_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            token = row[0] if not isinstance(row, sqlite3.Row) else row["bot_token"]
+
+            cursor.execute("DELETE FROM bots WHERE id = ?", (bot_id,))
+            if cursor.rowcount == 0:
+                return False
+            try:
+                cursor.execute("DELETE FROM users WHERE bot_token = ?", (token,))
+            except Exception:
+                pass
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"按ID删除机器人时出错: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()

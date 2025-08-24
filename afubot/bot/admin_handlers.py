@@ -394,8 +394,8 @@ async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await manager.stop_agent_bot(bot_config['bot_token'])
     await query.edit_message_text(f"正在从数据库中删除 '{agent_name}'...")
     success = False
-    if bot_config and bot_config.get('bot_token'):
-        success = database.delete_bot(bot_config['bot_token'])
+    if bot_config:
+        success = database.delete_bot_by_id(bot_id)
     if success:
         await query.edit_message_text(f"✅ 代理机器人 '{agent_name}' 已被成功删除。")
     else:
