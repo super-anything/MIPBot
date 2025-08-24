@@ -117,6 +117,13 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="✅ ✅ ✅ Mine-Clearing Successful! ✅ ✅ ✅")
     context.bot_data['is_signal_active'] = False
     logger.info(f"[{context.bot_data.get('agent_name')}] 信号已结束，锁已解除。")
+    try:
+        # 在解锁后，自动安排下一次发送，避免“仅首发一次就停止”的体验
+        delay = random.uniform(8, 15)
+        context.job_queue.run_once(_send_signal, when=delay)
+        logger.info(f"[{context.bot_data.get('agent_name')}] 已计划在 {delay:.1f}s 后再次触发发送。")
+    except Exception as e:
+        logger.warning(f"[{context.bot_data.get('agent_name')}] 计划再次触发发送失败: {e}")
 
 
 async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
