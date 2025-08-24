@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict
 
-from telegram.ext import Application, ApplicationBuilder, ContextTypes
+from telegram.ext import Application
 from telegram.request import HTTPXRequest
 
 
@@ -20,20 +20,20 @@ class ChannelSupervisor:
         self.running: Dict[str, Application] = {}  # token -> app
 
     async def start(self, bot_config: dict) -> Application | None:
+        """使用 axibot 的创建函数启动，从而带上 target_chat_id 和调度器。"""
         token = bot_config.get('bot_token')
         if not token:
             return None
         if token in self.running:
             return self.running[token]
         try:
-            request = HTTPXRequest(connection_pool_size=50)
-            app = ApplicationBuilder().token(token).request(request).build()
-            app.bot_data['bot_config'] = bot_config
-            await app.initialize()
-            await app.updater.start_polling(drop_pending_updates=True)
-            await app.start()
+            # 复用 axibot 的创建逻辑，确保设置 target_chat_id、job_queue 等
+            from axibot.main import _create_and_start_app, _normalize_channel_link
+
+            channel = _normalize_channel_link(bot_config.get('channel_link'))
+            app = await _create_and_start_app(token, channel, bot_config)
             self.running[token] = app
-            logger.info(f"ChannelSupervisor: started {bot_config.get('agent_name')}.")
+            logger.info(f"ChannelSupervisor: started {bot_config.get('agent_name')} with scheduler.")
             return app
         except Exception as e:
             logger.error(f"ChannelSupervisor: start failed: {e}")

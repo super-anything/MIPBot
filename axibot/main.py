@@ -201,7 +201,7 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"[{context.bot_data.get('agent_name')}] 发送信号失败: {e}")
         context.bot_data['is_signal_active'] = False
-
+        
 
 async def _schedule_checker(context: ContextTypes.DEFAULT_TYPE):
     # 如果机器人被暂停，则跳过发送
@@ -235,9 +235,19 @@ async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config:
     app.bot_data['last_signal_time'] = 0  # 记录上次发送信号的时间
     app.bot_data['image_file_ids'] = {}  # 缓存已上传的图片文件ID
 
-    # 安排重复性任务，降低轮询频率以减少资源消耗
+    # 安排重复性任务
     job_queue = app.job_queue
-    job_queue.run_repeating(_schedule_checker, interval=60, first=10)  # 每分钟检查一次
+    # 1) 保留原每分钟检查（概率触发）
+    job_queue.run_repeating(_schedule_checker, interval=60, first=10)
+    # 2) 新增固定配额调度：按每日条数平均分配（至少60秒一次）
+    try:
+        daily = getattr(config, 'DAILY_SEND_COUNT', 0) or 0
+        if daily > 0:
+            interval_seconds = max(60, int(86400 / int(daily)))
+            job_queue.run_repeating(_send_signal, interval=interval_seconds, first=15)
+            logger.info(f"[{app.bot_data.get('agent_name')}] 固定间隔调度已启用：每 {interval_seconds}s 触发一次")
+    except Exception as e:
+        logger.warning(f"配置固定调度失败: {e}")
 
     await app.initialize()
     # 仅发送，不强制需要轮询；但为了保持一致性，仍然启动轮询（可接收 / 健康检查等）
