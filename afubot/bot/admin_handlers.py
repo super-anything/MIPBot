@@ -227,7 +227,14 @@ async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             context.user_data.clear()
             return ConversationHandler.END
 
-        await update.message.reply_text(f"✅ 已保存为频道带单机器人 '{name}'。Axibot 将自动加载并在频道发送消息。")
+        # 直接启动频道发送端（无需重启），并由发送端自行首发
+        try:
+            supervisor = context.application.bot_data.get('channel_supervisor')
+            if supervisor is not None and new_bot_config:
+                await supervisor.start(new_bot_config)
+        except Exception as e:
+            logger.error(f"即时启动频道机器人失败: {e}")
+        await update.message.reply_text(f"✅ 已保存为频道带单机器人 '{name}'，已尝试启动。")
 
         context.user_data.clear()
         return ConversationHandler.END

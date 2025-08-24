@@ -46,6 +46,7 @@ class ChannelSupervisor:
                     job=SimpleNamespace(data={"force": True}),
                 )
                 await _send_signal(ctx)
+                logger.info(f"ChannelSupervisor: first send triggered -> {bot_config.get('agent_name')}")
             except Exception as e:
                 logger.warning(f"ChannelSupervisor: 首发失败: {e}")
             return app
