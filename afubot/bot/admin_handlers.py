@@ -329,11 +329,15 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
         manager = context.application.bot_data['manager']
         await manager.start_agent_bot(new_bot_config)
 
-        # 若为频道带单：交给 ChannelSupervisor 动态启动；不自动发
+        # 若为频道带单：交给 ChannelSupervisor 动态启动；并立即发送一条
         if bot_role == BOT_TYPE_CHANNEL:
             supervisor = context.application.bot_data.get('channel_supervisor')
             if supervisor is not None:
                 await supervisor.start(new_bot_config)
+                try:
+                    await supervisor.send_now(token)
+                except Exception:
+                    pass
         await context.bot.send_message(chat_id=chat_id, text=f"✅ 成功！代理 '{name}' 的机器人已添加并上线。")
     except Exception as e:
         logger.error(f"动态启动机器人失败: {e}")
