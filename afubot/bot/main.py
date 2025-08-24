@@ -100,8 +100,11 @@ async def startup():
     admin_app.add_handler(add_bot_handler)
     admin_app.add_handler(CommandHandler("listbots", list_bots))
     admin_app.add_handler(CommandHandler("delbot", delete_bot_start))
-    admin_app.add_handler(CallbackQueryHandler(delete_bot_confirm, pattern="^delbot_confirm_"))
-    admin_app.add_handler(CallbackQueryHandler(delete_bot_execute, pattern="^delbot_execute_"))
+    # 兼容老格式（token）与新格式（id）：先尝试严格匹配 id（数字），再兜底
+    admin_app.add_handler(CallbackQueryHandler(delete_bot_confirm, pattern="^delbot_confirm_\\d+$"))
+    admin_app.add_handler(CallbackQueryHandler(delete_bot_confirm, pattern="^delbot_confirm_.+$"))
+    admin_app.add_handler(CallbackQueryHandler(delete_bot_execute, pattern="^delbot_execute_\\d+$"))
+    admin_app.add_handler(CallbackQueryHandler(delete_bot_execute, pattern="^delbot_execute_.+$"))
     admin_app.add_handler(CallbackQueryHandler(delete_bot_cancel, pattern="^delbot_cancel$"))
 
     await manager.start_initial_bots()

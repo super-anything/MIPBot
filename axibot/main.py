@@ -320,13 +320,26 @@ class AxiBotManager:
 
             if status in ("administrator", "creator") and can_post:
                 # 权限通过，重置错误计数
+                prev_error_count = 0
                 if token in self.bot_status:
+                    prev_error_count = self.bot_status[token].get('error_count', 0)
                     self.bot_status[token]['error_count'] = 0
                     self.bot_status[token]['last_check'] = time.time()
                 logger.info(f"机器人 {agent_name} 在频道 {channel_id} 权限正常（{status}）")
+
+                # 如果之前权限检查失败过，现在刚恢复正常，立即触发一次发送
+                if prev_error_count > 0:
+                    try:
+                        logger.info(f"[{agent_name}] 权限恢复，立即触发一次发送任务以验证")
+                        app.job_queue.run_once(_send_signal, when=2)
+                    except Exception as e:
+                        logger.warning(f"[{agent_name}] 触发恢复发送失败: {e}")
                 return True
             else:
-                logger.error(f"机器人 {agent_name} 在频道 {channel_id} 权限不足（status={status}, can_post={can_post}）")
+                prev_error = 0
+                if token in self.bot_status:
+                    prev_error = self.bot_status[token].get('error_count', 0)
+                logger.error(f"机器人 {agent_name} 在频道 {channel_id} 权限不足（status={status}, can_post={can_post}），连续失败次数：{prev_error + 1}")
                 # 记录错误
                 if token not in self.bot_status:
                     self.bot_status[token] = {"error_count": 0, "last_error": 0, "last_check": time.time()}

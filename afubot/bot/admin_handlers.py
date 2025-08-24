@@ -100,7 +100,7 @@ async def get_agent_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    token = update.message.text
+    token = (update.message.text or "").strip()
     if ":" not in token or not token.split(":")[0].isdigit():
         await update.message.reply_text("Token格式似乎不正确，请重新发送。")
         return GETTING_BOT_TOKEN
@@ -344,7 +344,9 @@ async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     keyboard = []
     for bot in all_bots:
-        button = InlineKeyboardButton(bot['agent_name'], callback_data=f"delbot_confirm_{bot['bot_token']}")
+        # 使用数据库自增 id 作为回调参数，避免 Token 过长或包含冒号导致平台截断
+        bot_id = bot.get('id') if isinstance(bot, dict) else bot.id
+        button = InlineKeyboardButton(bot['agent_name'], callback_data=f"delbot_confirm_{bot_id}")
         keyboard.append([button])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("请选择您要删除的代理机器人：", reply_markup=reply_markup)
@@ -353,13 +355,18 @@ async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    token = query.data.split('_')[-1]
-    bot_config = database.get_bot_by_token(token)
+    bot_id_str = query.data.split('_')[-1]
+    try:
+        bot_id = int(bot_id_str)
+    except ValueError:
+        await query.edit_message_text("错误：回调参数异常，无法识别要删除的机器人。")
+        return
+    bot_config = database.get_bot_by_id(bot_id)
     if not bot_config:
         await query.edit_message_text("错误：找不到该机器人，可能已被删除。")
         return
     keyboard = [[
-        InlineKeyboardButton("✅ 是的，立即删除", callback_data=f"delbot_execute_{token}"),
+        InlineKeyboardButton("✅ 是的，立即删除", callback_data=f"delbot_execute_{bot_id}"),
         InlineKeyboardButton("❌ 取消", callback_data="delbot_cancel")
     ]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -373,14 +380,22 @@ async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    token = query.data.split('_')[-1]
-    bot_config = database.get_bot_by_token(token)
+    bot_id_str = query.data.split('_')[-1]
+    try:
+        bot_id = int(bot_id_str)
+    except ValueError:
+        await query.edit_message_text("错误：回调参数异常，删除已中止。")
+        return
+    bot_config = database.get_bot_by_id(bot_id)
     agent_name = html.escape(bot_config['agent_name']) if bot_config else "未知"
     await query.edit_message_text(f"正在停止机器人 '{agent_name}'...")
     manager = context.application.bot_data['manager']
-    await manager.stop_agent_bot(token)
+    if bot_config and bot_config.get('bot_token'):
+        await manager.stop_agent_bot(bot_config['bot_token'])
     await query.edit_message_text(f"正在从数据库中删除 '{agent_name}'...")
-    success = database.delete_bot(token)
+    success = False
+    if bot_config and bot_config.get('bot_token'):
+        success = database.delete_bot(bot_config['bot_token'])
     if success:
         await query.edit_message_text(f"✅ 代理机器人 '{agent_name}' 已被成功删除。")
     else:
