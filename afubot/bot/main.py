@@ -3,6 +3,7 @@ import logging
 import platform,random
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler
+from telegram.request import HTTPXRequest
 
 # 引入频道发送管理器
 try:
@@ -47,14 +48,15 @@ class BotManager:
             return
 
         try:
-            agent_app = ApplicationBuilder().token(token).build()
+            request = HTTPXRequest(connection_pool_size=100)
+            agent_app = ApplicationBuilder().token(token).request(request).build()
             agent_app.bot_data['config'] = bot_config
 
             # --- 关键修改：加载总对话处理器 ---
             agent_app.add_handler(conversation_handler)
 
             await agent_app.initialize()
-            await agent_app.updater.start_polling()
+            await agent_app.updater.start_polling(drop_pending_updates=True)
             await agent_app.start()
 
             self.running_bots[token] = agent_app
@@ -133,7 +135,7 @@ async def startup():
 
     logger.info("正在以非阻塞模式启动主管理机器人...")
     await admin_app.initialize()
-    await admin_app.updater.start_polling()
+    await admin_app.updater.start_polling(drop_pending_updates=True)
     await admin_app.start()
 
     logger.info("所有机器人均已运行。按 Ctrl+C 退出。")
