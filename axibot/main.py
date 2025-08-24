@@ -202,12 +202,12 @@ async def _schedule_checker(context: ContextTypes.DEFAULT_TYPE):
         asyncio.create_task(_send_signal(context))
 
 
-# 创建共享HTTP请求处理器，减少连接资源消耗
-_shared_request = HTTPXRequest(connection_pool_size=100)
+# HTTP 请求处理器在应用创建时按需实例化，避免跨线程/事件循环复用
 
 async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config: dict | None = None) -> Application:
-    # 使用共享HTTP请求处理器
-    app = ApplicationBuilder().token(bot_token).request(_shared_request).build()
+    # 在当前事件循环中创建 HTTPXRequest，避免“bound to a different event loop”错误
+    request = HTTPXRequest(connection_pool_size=100)
+    app = ApplicationBuilder().token(bot_token).request(request).build()
     app.bot_data['target_chat_id'] = target_chat_id
     app.bot_data['bot_config'] = bot_config or {}
     app.bot_data['agent_name'] = (bot_config or {}).get('agent_name', 'Agent')
