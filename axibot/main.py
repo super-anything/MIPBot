@@ -315,6 +315,23 @@ class AxiBotManager:
         except Exception as e:
             logger.error(f"停止机器人出错: {e}")
 
+    async def trigger_send_now(self, token):
+        """强制立即触发一次发送（如果机器人已在运行）。"""
+        app = self.running_bots.get(token)
+        if not app:
+            logger.warning(f"trigger_send_now: 机器人未运行: {token}")
+            return False
+        try:
+            # 清理忙碌标记并强制触发
+            app.bot_data['is_signal_active'] = False
+            app.bot_data['last_signal_time'] = 0
+            app.job_queue.run_once(_send_signal, when=1, data={"force": True})
+            logger.info(f"trigger_send_now: 已触发一次发送 -> {app.bot_data.get('agent_name')}")
+            return True
+        except Exception as e:
+            logger.error(f"trigger_send_now 失败: {e}")
+            return False
+
     async def check_bot_permissions(self, app, channel_id, bot_config=None):
         """检查机器人在频道中的权限（不发测试消息）。
         逻辑：通过 get_chat_member 获取自身在该频道的权限；

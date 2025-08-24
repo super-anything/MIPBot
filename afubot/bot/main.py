@@ -15,6 +15,8 @@ from .admin_handlers import (
     add_bot_handler,
     start_admin,
     list_bots,
+    send_now_start,
+    send_now_execute,
     delete_bot_start,
     delete_bot_confirm,
     delete_bot_execute,
@@ -91,6 +93,7 @@ async def startup():
     bot_commands = [
         BotCommand("addbot", "➕ 添加新代理"),
         BotCommand("listbots", "📋 查看列表"),
+        BotCommand("sendnow", "🚀 频道立即发送"),
         BotCommand("delbot", "🗑️ 删除代理"),
         BotCommand("help", "❓ 获取帮助"),
         BotCommand("cancel", "❌ 取消当前操作"),
@@ -108,7 +111,9 @@ async def startup():
     admin_app.add_handler(CommandHandler(["start", "help"], start_admin))
     admin_app.add_handler(add_bot_handler)
     admin_app.add_handler(CommandHandler("listbots", list_bots))
+    admin_app.add_handler(CommandHandler("sendnow", send_now_start))
     admin_app.add_handler(CommandHandler("delbot", delete_bot_start))
+    admin_app.add_handler(CallbackQueryHandler(send_now_execute, pattern="^sendnow_"))
     # 兼容老格式（token）与新格式（id）：先尝试严格匹配 id（数字），再兜底
     admin_app.add_handler(CallbackQueryHandler(delete_bot_confirm, pattern="^delbot_confirm_\\d+$"))
     admin_app.add_handler(CallbackQueryHandler(delete_bot_confirm, pattern="^delbot_confirm_.+$"))

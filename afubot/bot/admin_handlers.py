@@ -86,6 +86,35 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("".join(message_parts), parse_mode='HTML')
 
 
+# --- 强制触发一次发送 ---
+async def send_now_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+    all_bots = database.get_active_bots(role=BOT_TYPE_CHANNEL)
+    if not all_bots:
+        await update.message.reply_text("当前没有频道带单机器人。")
+        return
+    keyboard = []
+    for bot in all_bots:
+        keyboard.append([InlineKeyboardButton(bot['agent_name'], callback_data=f"sendnow_{bot['bot_token']}")])
+    await update.message.reply_text("请选择要立即发送的频道机器人：", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def send_now_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    token = query.data.split('_', 1)[-1]
+    axi_manager = context.application.bot_data.get('axi_manager')
+    if not axi_manager:
+        await query.edit_message_text("发送服务未启动。")
+        return
+    ok = await axi_manager.trigger_send_now(token)
+    if ok:
+        await query.edit_message_text("✅ 已触发一次发送。")
+    else:
+        await query.edit_message_text("❌ 触发失败（机器人可能未运行）。")
+
+
 # --- 添加机器人流程 ---
 async def start_add_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not is_admin(update): return ConversationHandler.END
