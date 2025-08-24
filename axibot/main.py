@@ -114,7 +114,17 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
-    if context.bot_data.get('is_signal_active', False):
+    # 支持强制发送：当权限刚恢复时即刻首发
+    force = False
+    try:
+        job = getattr(context, 'job', None)
+        data = getattr(job, 'data', None) if job else None
+        if isinstance(data, dict) and data.get('force'):
+            force = True
+    except Exception:
+        force = False
+
+    if not force and context.bot_data.get('is_signal_active', False):
         logger.info(f"[{context.bot_data.get('agent_name')}] 检测到已有信号进行中，跳过。")
         return
 
@@ -330,11 +340,11 @@ class AxiBotManager:
                 # 如果之前权限检查失败过，现在刚恢复正常，立即触发一次发送
                 if prev_error_count > 0:
                     try:
-                        logger.info(f"[{agent_name}] 权限恢复，立即触发一次发送任务以验证")
+                        logger.info(f"[{agent_name}] 权限恢复，立即触发一次发送任务以验证 (force)")
                         # 清除可能残留的“信号进行中”标记，确保不会被跳过
                         app.bot_data['is_signal_active'] = False
                         app.bot_data['last_signal_time'] = 0
-                        app.job_queue.run_once(_send_signal, when=2)
+                        app.job_queue.run_once(_send_signal, when=2, data={"force": True})
                     except Exception as e:
                         logger.warning(f"[{agent_name}] 触发恢复发送失败: {e}")
                 return True
