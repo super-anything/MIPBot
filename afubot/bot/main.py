@@ -88,7 +88,8 @@ class BotManager:
 async def startup():
     database.initialize_db()
     manager = BotManager()
-    axi_manager = AxiBotManager() if AxiBotManager is not None else None
+    # 不再启用 AxiBotManager，统一由 ChannelSupervisor 管理频道机器人，避免重复实例
+    axi_manager = None
     channel_supervisor = ChannelSupervisor()
 
     # --- 关键修改：优化了管理员菜单 ---
@@ -106,8 +107,6 @@ async def startup():
 
     admin_app = ApplicationBuilder().token(config.ADMIN_BOT_TOKEN).post_init(post_init).build()
     admin_app.bot_data['manager'] = manager
-    if axi_manager is not None:
-        admin_app.bot_data['axi_manager'] = axi_manager
     admin_app.bot_data['channel_supervisor'] = channel_supervisor
 
     # 注册所有管理员处理器
@@ -125,10 +124,12 @@ async def startup():
     admin_app.add_handler(CallbackQueryHandler(delete_bot_cancel, pattern="^delbot_cancel$"))
 
     await manager.start_initial_bots()
-    # 启动频道发送管理器并开始监控（无需单独进程）
-    if axi_manager is not None:
-        await axi_manager.start_all_bots()
-        axi_manager.start_monitor()
+    # 启动已存在的频道机器人，统一由 ChannelSupervisor 管理，避免与其它服务冲突
+    try:
+        for bot in database.get_active_bots(role='channel'):
+            await channel_supervisor.start(bot)
+    except Exception as e:
+        logger.error(f"启动已存在的频道机器人失败: {e}")
 
     logger.info("正在以非阻塞模式启动主管理机器人...")
     await admin_app.initialize()

@@ -140,8 +140,15 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"[{context.bot_data.get('agent_name')}] [SEND] enter force={force}, is_active={context.bot_data.get('is_signal_active', False)}, target={context.bot_data.get('target_chat_id')}")
 
     if not force and context.bot_data.get('is_signal_active', False):
-        logger.info(f"[{context.bot_data.get('agent_name')}] [SEND] skip because is_signal_active=True (last={int(time.time()-context.bot_data.get('last_signal_time',0))}s)")
-        return
+        # 如果超过5分钟仍为占用，认定为陈旧锁，清除后继续；否则跳过
+        last = context.bot_data.get('last_signal_time', 0)
+        age = int(time.time() - last)
+        if age > 300:
+            logger.warning(f"[{context.bot_data.get('agent_name')}] [SEND] detected stale lock {age}s, force releasing")
+            context.bot_data['is_signal_active'] = False
+        else:
+            logger.info(f"[{context.bot_data.get('agent_name')}] [SEND] skip because is_signal_active=True (last={age}s)")
+            return
 
     try:
         call_count = context.bot_data.get('signal_call_count', 0) + 1
