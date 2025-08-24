@@ -188,11 +188,19 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['last_signal_time'] = time.time()
 
         # 减少不必要的消息
-        await context.bot.send_message(chat_id=target_chat, text="Checking for a new signal...")
-        await asyncio.sleep(random.uniform(1, 2))  # 减少等待时间
+        try:
+            await context.bot.send_message(chat_id=target_chat, text="Checking for a new signal...")
+        except Exception as e:
+            logger.warning(f"[{agent_name}] 发送前置提示失败: {e}")
+        await asyncio.sleep(random.uniform(1, 2))
 
         signal_message = generate_signal_message(bot_conf)
-        await context.bot.send_message(chat_id=target_chat, text=signal_message)
+        try:
+            await context.bot.send_message(chat_id=target_chat, text=signal_message)
+        except Exception as e:
+            logger.error(f"[{agent_name}] 发送信号文本失败: {e}")
+            context.bot_data['is_signal_active'] = False
+            return
         logger.info(f"[{agent_name}] 成功发送一条信号 -> {target_chat}")
 
         job_queue = context.job_queue
@@ -242,6 +250,8 @@ async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config:
     # 安排重复性任务，降低轮询频率以减少资源消耗
     job_queue = app.job_queue
     job_queue.run_repeating(_schedule_checker, interval=60, first=10)  # 每分钟检查一次
+    # 冗余兜底：每10分钟尝试触发一次发送（若正在发送则自动跳过）
+    job_queue.run_repeating(_send_signal, interval=600, first=180, data={"force": False})
 
     await app.initialize()
     # 仅发送，不强制需要轮询；但为了保持一致性，仍然启动轮询（可接收 / 健康检查等）
@@ -329,11 +339,21 @@ class AxiBotManager:
             logger.warning(f"trigger_send_now: 机器人未运行: {token}")
             return False
         try:
-            # 清理忙碌标记并强制触发
+            # 清理忙碌标记
             app.bot_data['is_signal_active'] = False
             app.bot_data['last_signal_time'] = 0
-            app.job_queue.run_once(_send_signal, when=1, data={"force": True})
-            logger.info(f"trigger_send_now: 已触发一次发送 -> {app.bot_data.get('agent_name')}")
+
+            # 直接调用发送逻辑，避免作业调度器偶发不触发
+            from types import SimpleNamespace
+            ctx = SimpleNamespace(
+                bot=app.bot,
+                bot_data=app.bot_data,
+                application=app,
+                job_queue=app.job_queue,
+                job=SimpleNamespace(data={"force": True}),
+            )
+            await _send_signal(ctx)
+            logger.info(f"trigger_send_now: 已直接执行一次发送 -> {app.bot_data.get('agent_name')}")
             return True
         except Exception as e:
             logger.error(f"trigger_send_now 失败: {e}")
