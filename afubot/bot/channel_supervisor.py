@@ -34,6 +34,20 @@ class ChannelSupervisor:
             app = await _create_and_start_app(token, channel, bot_config)
             self.running[token] = app
             logger.info(f"ChannelSupervisor: started {bot_config.get('agent_name')} with scheduler.")
+            # 新建后立即首发一次，确保“新增即有输出”
+            try:
+                from axibot.main import _send_signal
+                from types import SimpleNamespace
+                ctx = SimpleNamespace(
+                    bot=app.bot,
+                    bot_data=app.bot_data,
+                    application=app,
+                    job_queue=app.job_queue,
+                    job=SimpleNamespace(data={"force": True}),
+                )
+                await _send_signal(ctx)
+            except Exception as e:
+                logger.warning(f"ChannelSupervisor: 首发失败: {e}")
             return app
         except Exception as e:
             logger.error(f"ChannelSupervisor: start failed: {e}")

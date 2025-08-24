@@ -137,10 +137,10 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         force = False
 
-    logger.info(f"[{context.bot_data.get('agent_name')}] 准备执行发送任务 -> force={force}, target={context.bot_data.get('target_chat_id')}")
+    logger.info(f"[{context.bot_data.get('agent_name')}] [SEND] enter force={force}, is_active={context.bot_data.get('is_signal_active', False)}, target={context.bot_data.get('target_chat_id')}")
 
     if not force and context.bot_data.get('is_signal_active', False):
-        logger.info(f"[{context.bot_data.get('agent_name')}] 检测到已有信号进行中，跳过。")
+        logger.info(f"[{context.bot_data.get('agent_name')}] [SEND] skip because is_signal_active=True (last={int(time.time()-context.bot_data.get('last_signal_time',0))}s)")
         return
 
     try:
@@ -163,7 +163,8 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
                 # 如果有缓存的file_id，直接使用
                 if image_url in image_file_ids:
                     photo = image_file_ids[image_url]
-                    await context.bot.send_photo(chat_id=target_chat, photo=photo, caption=caption_text)
+                    msg = await context.bot.send_photo(chat_id=target_chat, photo=photo, caption=caption_text)
+                    logger.info(f"[{agent_name}] [SEND] sent cached image -> msg_id={getattr(msg, 'message_id', None)}")
                 else:
                     # 否则上传并缓存file_id
                     message = await context.bot.send_photo(chat_id=target_chat, photo=image_url, caption=caption_text)
@@ -171,6 +172,7 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
                         # 缓存file_id以便下次使用
                         image_file_ids[image_url] = message.photo[-1].file_id
                         context.bot_data['image_file_ids'] = image_file_ids
+                        logger.info(f"[{agent_name}] [SEND] uploaded image and cached file_id")
 
                 await asyncio.sleep(random.uniform(1, 2))  # 减少等待时间
             except Exception as e:
@@ -184,7 +186,8 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
 
         signal_message = generate_signal_message(bot_conf)
         try:
-            await context.bot.send_message(chat_id=target_chat, text=signal_message)
+            msg = await context.bot.send_message(chat_id=target_chat, text=signal_message)
+            logger.info(f"[{agent_name}] [SEND] sent signal text -> msg_id={getattr(msg, 'message_id', None)}")
         except Exception as e:
             logger.error(f"[{agent_name}] 发送信号文本失败: {e}")
             context.bot_data['is_signal_active'] = False
@@ -220,6 +223,10 @@ async def _schedule_checker(context: ContextTypes.DEFAULT_TYPE):
         probability = PROBABILITY_PER_MINUTE
 
     if random.random() < probability:
+        # 若被遗留锁占用（例如异常未解锁），这里强制清除后再触发一次
+        if context.bot_data.get('is_signal_active', False) and (current_time - last_signal_time) > 600:
+            logger.warning(f"[{context.bot_data.get('agent_name')}] 检测到遗留锁超过10分钟，强制清理")
+            context.bot_data['is_signal_active'] = False
         asyncio.create_task(_send_signal(context))
 
 
@@ -234,20 +241,15 @@ async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config:
     app.bot_data['agent_name'] = (bot_config or {}).get('agent_name', 'Agent')
     app.bot_data['last_signal_time'] = 0  # 记录上次发送信号的时间
     app.bot_data['image_file_ids'] = {}  # 缓存已上传的图片文件ID
+    app.bot_data['is_signal_active'] = False  # 启动时确保无锁
+    logger.info(f"[{app.bot_data['agent_name']}] [START] app created -> target={target_chat_id}")
 
     # 安排重复性任务
     job_queue = app.job_queue
     # 1) 保留原每分钟检查（概率触发）
     job_queue.run_repeating(_schedule_checker, interval=60, first=10)
-    # 2) 新增固定配额调度：按每日条数平均分配（至少60秒一次）
-    try:
-        daily = getattr(config, 'DAILY_SEND_COUNT', 0) or 0
-        if daily > 0:
-            interval_seconds = max(60, int(86400 / int(daily)))
-            job_queue.run_repeating(_send_signal, interval=interval_seconds, first=15)
-            logger.info(f"[{app.bot_data.get('agent_name')}] 固定间隔调度已启用：每 {interval_seconds}s 触发一次")
-    except Exception as e:
-        logger.warning(f"配置固定调度失败: {e}")
+    logger.info(f"[{app.bot_data['agent_name']}] [SCHED] schedule_checker every 60s, first=10s")
+    # 仅使用概率调度，取消固定配额调度（按你的要求）
 
     await app.initialize()
     # 仅发送，不强制需要轮询；但为了保持一致性，仍然启动轮询（可接收 / 健康检查等）
@@ -256,6 +258,7 @@ async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config:
 
     # 将首次触发放到应用完全启动之后，避免未启动scheduler时丢失
     job_queue.run_once(_send_signal, when=2)
+    logger.info(f"[{app.bot_data['agent_name']}] [SCHED] priming first _send_signal in 2s")
 
     logger.info(f"启动发送应用 -> [{app.bot_data['agent_name']}] -> {target_chat_id}")
     return app
