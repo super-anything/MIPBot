@@ -151,14 +151,10 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         agent_name = context.bot_data.get('agent_name')
         logger.info(f"[{agent_name}] 信号任务触发第 {call_count} 次 -> {target_chat}")
 
-        # 检查当前时间是否在活跃时间范围内
-        current_hour = datetime.datetime.now().hour
-        token = context.bot.token
-
-        # 如果有设置活跃时间且当前不在活跃时间内，则跳过
-        active_hours = context.application.bot_data.get('active_hours', [])
-        if active_hours and current_hour not in active_hours:
-            logger.info(f"[{agent_name}] 当前时间 {current_hour}点 不在活跃时间范围内，跳过发送")
+        # 只有启动后调用 /sendnow 才开始进入周期发送
+        started = context.application.bot_data.get('started_by_sendnow', False)
+        if not started and not force:
+            logger.info(f"[{agent_name}] 尚未通过 /sendnow 启动，跳过发送")
             return
 
         if call_count % 3 == 1:
@@ -250,8 +246,6 @@ async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config:
     # 安排重复性任务，降低轮询频率以减少资源消耗
     job_queue = app.job_queue
     job_queue.run_repeating(_schedule_checker, interval=60, first=10)  # 每分钟检查一次
-    # 冗余兜底：每10分钟尝试触发一次发送（若正在发送则自动跳过）
-    job_queue.run_repeating(_send_signal, interval=600, first=180, data={"force": False})
 
     await app.initialize()
     # 仅发送，不强制需要轮询；但为了保持一致性，仍然启动轮询（可接收 / 健康检查等）
