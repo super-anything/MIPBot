@@ -151,11 +151,7 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         agent_name = context.bot_data.get('agent_name')
         logger.info(f"[{agent_name}] 信号任务触发第 {call_count} 次 -> {target_chat}")
 
-        # 只有启动后调用 /sendnow 才开始进入周期发送
-        started = context.application.bot_data.get('started_by_sendnow', False)
-        if not started and not force:
-            logger.info(f"[{agent_name}] 尚未通过 /sendnow 启动，跳过发送")
-            return
+        # 去掉 sendnow 门槛，任何时候都可由调度或手动触发
 
         if call_count % 3 == 1:
             try:
@@ -183,11 +179,7 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['is_signal_active'] = True
         context.bot_data['last_signal_time'] = time.time()
 
-        # 减少不必要的消息
-        try:
-            await context.bot.send_message(chat_id=target_chat, text="Checking for a new signal...")
-        except Exception as e:
-            logger.warning(f"[{agent_name}] 发送前置提示失败: {e}")
+        # 不再发送“检查信号”提示，直接进入信号内容
         await asyncio.sleep(random.uniform(1, 2))
 
         signal_message = generate_signal_message(bot_conf)
@@ -300,11 +292,7 @@ class AxiBotManager:
             # 检查权限
             await self.check_bot_permissions(app, channel, bot_config)
             logger.info(f"成功启动机器人 {bot_config.get('agent_name')} -> {channel}")
-            # 启动后再补一个兜底：立即尝试发一条提示消息，验证可发言
-            try:
-                await app.bot.send_message(chat_id=channel, text="Bot activated. Preparing first signal...")
-            except Exception as e:
-                logger.warning(f"[{bot_config.get('agent_name')}] 启动后试发提示消息失败: {e}")
+            # 启动后不再发送提示文本，避免打扰用户
             return app
         except Exception as e:
             logger.error(f"启动机器人失败 {bot_config.get('agent_name')}: {e}")

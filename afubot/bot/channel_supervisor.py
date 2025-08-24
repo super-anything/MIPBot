@@ -61,7 +61,17 @@ class ChannelSupervisor:
         if not target:
             return False
         try:
-            await app.bot.send_message(chat_id=target, text=text or "Bot activated. Preparing first signal...")
+            # 复用 axibot 的发送逻辑
+            from axibot.main import _send_signal
+            from types import SimpleNamespace
+            ctx = SimpleNamespace(
+                bot=app.bot,
+                bot_data=app.bot_data,
+                application=app,
+                job_queue=app.job_queue,
+                job=SimpleNamespace(data={"force": True}),
+            )
+            await _send_signal(ctx)
             return True
         except Exception as e:
             logger.error("ChannelSupervisor: send_now failed: %s", e)
