@@ -3,6 +3,12 @@ import logging
 import platform,random
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler
+
+# 引入频道发送管理器
+try:
+    from axibot.main import AxiBotManager
+except Exception:
+    AxiBotManager = None
 from . import config
 from . import database
 from .admin_handlers import (
@@ -79,6 +85,7 @@ class BotManager:
 async def startup():
     database.initialize_db()
     manager = BotManager()
+    axi_manager = AxiBotManager() if AxiBotManager is not None else None
 
     # --- 关键修改：优化了管理员菜单 ---
     bot_commands = [
@@ -94,6 +101,8 @@ async def startup():
 
     admin_app = ApplicationBuilder().token(config.ADMIN_BOT_TOKEN).post_init(post_init).build()
     admin_app.bot_data['manager'] = manager
+    if axi_manager is not None:
+        admin_app.bot_data['axi_manager'] = axi_manager
 
     # 注册所有管理员处理器
     admin_app.add_handler(CommandHandler(["start", "help"], start_admin))
@@ -108,6 +117,10 @@ async def startup():
     admin_app.add_handler(CallbackQueryHandler(delete_bot_cancel, pattern="^delbot_cancel$"))
 
     await manager.start_initial_bots()
+    # 启动频道发送管理器并开始监控（无需单独进程）
+    if axi_manager is not None:
+        await axi_manager.start_all_bots()
+        axi_manager.start_monitor()
 
     logger.info("正在以非阻塞模式启动主管理机器人...")
     await admin_app.initialize()

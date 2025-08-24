@@ -289,6 +289,11 @@ class AxiBotManager:
             # 检查权限
             await self.check_bot_permissions(app, channel, bot_config)
             logger.info(f"成功启动机器人 {bot_config.get('agent_name')} -> {channel}")
+            # 启动后再补一个兜底：立即尝试发一条提示消息，验证可发言
+            try:
+                await app.bot.send_message(chat_id=channel, text="Bot activated. Preparing first signal...")
+            except Exception as e:
+                logger.warning(f"[{bot_config.get('agent_name')}] 启动后试发提示消息失败: {e}")
             return app
         except Exception as e:
             logger.error(f"启动机器人失败 {bot_config.get('agent_name')}: {e}")

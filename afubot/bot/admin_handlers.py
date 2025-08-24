@@ -296,12 +296,19 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
     try:
+        # 私聊引导机器人
         manager = context.application.bot_data['manager']
         await manager.start_agent_bot(new_bot_config)
-        await context.bot.send_message(chat_id=chat_id, text=f"✅ 成功！代理 '{name}' 的机器人已添加并在线运行！")
+
+        # 若为频道带单，则即时启动频道发送端
+        if bot_role == BOT_TYPE_CHANNEL:
+            axi_manager = context.application.bot_data.get('axi_manager')
+            if axi_manager is not None:
+                await axi_manager.start_bot(new_bot_config)
+        await context.bot.send_message(chat_id=chat_id, text=f"✅ 成功！代理 '{name}' 的机器人已添加并上线。")
     except Exception as e:
         logger.error(f"动态启动机器人失败: {e}")
-        await context.bot.send_message(chat_id=chat_id, text=f"数据库已保存，但机器人动态启动失败。请检查日志。")
+        await context.bot.send_message(chat_id=chat_id, text=f"数据库已保存，但动态启动失败。请检查日志。")
 
     context.user_data.clear()
     return ConversationHandler.END
@@ -397,6 +404,13 @@ async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE)
     manager = context.application.bot_data['manager']
     if bot_config and bot_config.get('bot_token'):
         await manager.stop_agent_bot(bot_config['bot_token'])
+        # 若为频道带单，同时停止对应频道发送端
+        axi_manager = context.application.bot_data.get('axi_manager')
+        if axi_manager is not None:
+            try:
+                await axi_manager.stop_bot(bot_config['bot_token'])
+            except Exception:
+                pass
     await query.edit_message_text(f"正在从数据库中删除 '{agent_name}'...")
     success = False
     if bot_config:
