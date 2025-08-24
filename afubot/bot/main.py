@@ -3,11 +3,9 @@ import logging
 import platform,random
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler
-
-# --- 1. 从项目中导入所有需要的函数 (已清理和统一) ---
-import config
-import database
-from admin_handlers import (
+from . import config
+from . import database
+from .admin_handlers import (
     add_bot_handler,
     start_admin,
     list_bots,
@@ -16,7 +14,7 @@ from admin_handlers import (
     delete_bot_execute,
     delete_bot_cancel
 )
-from handlers import conversation_handler
+from .handlers import conversation_handler
 
 # --- 2. 日志配置 ---
 logging.basicConfig(
@@ -70,7 +68,8 @@ class BotManager:
                 logger.error(f"停止机器人 '{name}' 时发生错误: {e}")
 
     async def start_initial_bots(self):
-        initial_bots = database.get_active_bots()
+        # 仅启动私聊引导机器人
+        initial_bots = database.get_active_bots(role='private')
         logger.info(f"发现 {len(initial_bots)} 个活跃的代理机器人，正在启动...")
         tasks = [self.start_agent_bot(bot_config) for bot_config in initial_bots]
         await asyncio.gather(*tasks)

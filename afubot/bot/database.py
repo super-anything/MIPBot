@@ -1,4 +1,4 @@
-from config import (
+from .config import (
     DB_BACKEND,
     DB_FILE,
     MYSQL_HOST,
@@ -48,9 +48,11 @@ def initialize_db():
                 bot_token VARCHAR(255) NOT NULL UNIQUE,
                 registration_link TEXT NOT NULL,
                 channel_link TEXT,
+                play_url TEXT,
                 video_url TEXT,
                 image_url TEXT,
                 prediction_bot_link TEXT,
+                bot_role VARCHAR(32) NOT NULL DEFAULT 'private',
                 is_active TINYINT(1) NOT NULL DEFAULT 1,
                 video_file_id TEXT,
                 image_file_id TEXT,
@@ -58,6 +60,34 @@ def initialize_db():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """
         )
+        # 兼容旧表：若缺少 play_url 列则补充
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'bots' AND COLUMN_NAME = 'play_url'
+                """,
+                (MYSQL_DATABASE,)
+            )
+            count = cursor.fetchone()[0]
+            if count == 0:
+                cursor.execute("ALTER TABLE bots ADD COLUMN play_url TEXT")
+        except Exception:
+            pass
+        # 兼容旧表：若缺少 bot_role 列则补充
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'bots' AND COLUMN_NAME = 'bot_role'
+                """,
+                (MYSQL_DATABASE,)
+            )
+            count = cursor.fetchone()[0]
+            if count == 0:
+                cursor.execute("ALTER TABLE bots ADD COLUMN bot_role VARCHAR(32) NOT NULL DEFAULT 'private'")
+        except Exception:
+            pass
     else:
         cursor.execute(
             """
@@ -67,9 +97,11 @@ def initialize_db():
                 bot_token TEXT NOT NULL UNIQUE,
                 registration_link TEXT NOT NULL,
                 channel_link TEXT,
+                play_url TEXT,
                 video_url TEXT,
                 image_url TEXT,
                 prediction_bot_link TEXT,
+                bot_role TEXT NOT NULL DEFAULT 'private',
                 is_active INTEGER NOT NULL DEFAULT 1,
                 video_file_id TEXT,
                 image_file_id TEXT,
@@ -80,7 +112,7 @@ def initialize_db():
         # 兼容旧表：为缺失的列做补充
         cursor.execute("PRAGMA table_info('bots');")
         existing_cols = {row[1] for row in cursor.fetchall()}
-        for col in ("video_file_id", "image_file_id", "deposit_file_id"):
+        for col in ("video_file_id", "image_file_id", "deposit_file_id", "play_url", "bot_role"):
             if col not in existing_cols:
                 cursor.execute(f"ALTER TABLE bots ADD COLUMN {col} TEXT")
 
@@ -89,18 +121,27 @@ def initialize_db():
     print("数据库初始化完成。")
 
 
-def get_active_bots():
+def get_active_bots(role: str | None = None):
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
             with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM bots WHERE is_active = 1")
-                return cursor.fetchall()
+                if role:
+                    cursor.execute("SELECT * FROM bots WHERE is_active = 1 AND bot_role = %s", (role,))
+                    return cursor.fetchall()
+                else:
+                    cursor.execute("SELECT * FROM bots WHERE is_active = 1")
+                    return cursor.fetchall()
         else:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM bots WHERE is_active = 1")
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            if role:
+                cursor.execute("SELECT * FROM bots WHERE is_active = 1 AND bot_role = ?", (role,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+            else:
+                cursor.execute("SELECT * FROM bots WHERE is_active = 1")
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
     finally:
         conn.close()
 
@@ -121,17 +162,17 @@ def get_all_bots():
         conn.close()
 
 
-def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, video_url: str = None, image_url: str = None, prediction_bot_link: str = None):
+def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, play_url: str | None = None, video_url: str = None, image_url: str = None, prediction_bot_link: str = None, bot_role: str = 'private'):
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
             try:
                 with conn.cursor() as cursor:
                     sql = (
-                        "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, video_url, image_url, prediction_bot_link) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                        "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
                     )
-                    cursor.execute(sql, (agent_name, token, reg_link, channel_link, video_url, image_url, prediction_bot_link))
+                    cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role))
                     conn.commit()
                     bot_id = cursor.lastrowid
                     return get_bot_by_id(bot_id)
@@ -140,10 +181,10 @@ def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None
         else:
             cursor = conn.cursor()
             sql = (
-                "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, video_url, image_url, prediction_bot_link) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            cursor.execute(sql, (agent_name, token, reg_link, channel_link, video_url, image_url, prediction_bot_link))
+            cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role))
             conn.commit()
             bot_id = cursor.lastrowid
             return get_bot_by_id(bot_id)

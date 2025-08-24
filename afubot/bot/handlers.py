@@ -3,8 +3,8 @@ import logging
 import random
 import re
 import time
-import config
-import database
+from . import config
+from . import database
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.error import RetryAfter, TimedOut, NetworkError
@@ -20,7 +20,7 @@ from telegram.ext import (
 logger = logging.getLogger(__name__)
 
 # --- 对话状态定义 ---
-AWAITING_ID, AWAITING_RECHARGE_CONFIRM = range(2)
+AWAITING_ID, AWAITING_RECHARGE_CONFIRM, AWAITING_REGISTER_CONFIRM = range(3)
 NAG_INTERVAL_SECONDS = 10
 MAX_NAG_ATTEMPTS = 6
 
@@ -174,21 +174,71 @@ async def nag_recharge_callback(context: ContextTypes.DEFAULT_TYPE):
     context.user_data[f'recharge_nag_job_name_{user_id}'] = job_name
 
 
+# --- 新增：注册确认/引导 ---
+async def _send_register_prompt(update_or_context, context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    keyboard = [[
+        InlineKeyboardButton("Yes✅", callback_data="reg_yes"),
+        InlineKeyboardButton("No🧩", callback_data="reg_no")
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await _retry_send(lambda: context.bot.send_message(
+        chat_id=chat_id,
+        text="Bhai, registration ho gaya? ✅\nHo gaya to 'Yes' dabao, warna 'No' par click karo – main guide karta hoon 🚀",
+        reply_markup=reply_markup
+    ))
+
+
+async def _proceed_deposit_and_final(context: ContextTypes.DEFAULT_TYPE, chat_id: int, bot_config: dict):
+    # 第四步：存款与视频（Hinglish 文案）
+    lines = [
+        "Chalo ab turant Deposit 💳 par click karo, minimum 100 deposit karo. Main tumhe sikhata hoon kaise 100 ko 10000 me badalna hai! 💥 Phir main tumhe prediction robot 🤖 dunga – simple!",
+        "\nBhai, tum goal ke bahut kareeb ho 🎯. Aaj ek kadam badhao, future wala tum khud ko thank karega 🙏.",
+        "\nMauka saamne hai, success bas ek kadam door 🏁. Doubt mat karo, abhi action lo ⚡!",
+    ]
+    for t in lines:
+        await human_send_message(context, chat_id, t)
+
+    # 存款教学视频
+    try:
+        deposit_video_url = random.choice(config.IMAGE_LIBRARY['deposit_guide'])
+        deposit_file_id = bot_config.get('deposit_file_id')
+        await indicate_action(context, chat_id, ChatAction.UPLOAD_VIDEO, random.uniform(0.4, 0.8))
+        if deposit_file_id:
+            await _retry_send(lambda: context.bot.send_video(chat_id=chat_id, video=deposit_file_id))
+        else:
+            msg = await send_video_with_cache(context, chat_id, deposit_video_url)
+            try:
+                fid = getattr(getattr(msg, 'video', None), 'file_id', None)
+                if fid:
+                    database.update_bot_file_ids(bot_config['bot_token'], deposit_file_id=fid)
+                    bot_config['deposit_file_id'] = fid
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Failed to send deposit guide: {e}")
+
+    await asyncio.sleep(3)
+
+    # 最后一步：进入频道
+    channel_link = bot_config.get('channel_link') or 'Channel link not configured'
+    final_text = (
+        "Last step! 🏁\n"
+        "👉 Prediction Robot channel join karo aur bell on karo 🔔\n"
+        "Wahan main useful tips 🛠️ regular share karunga,\n"
+        "taaki tum step‑by‑step seekho aur kamao 🚀\n"
+        f"{channel_link}"
+    )
+    await human_send_message(context, chat_id, final_text)
+
+
 # --- 对话流程函数 ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理 /start 命令，作为对话的入口点"""
+    """处理 /start 命令，作为对话的入口点（重写为分步脚本）"""
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
     bot_config = context.bot_data.get('config', {})
 
-    # 0. 个性化称呼与问候
-    user_name = (update.effective_user.first_name or "dost").strip()
-    hour = time.localtime().tm_hour
-    greeting = "Good morning" if 5 <= hour < 12 else ("Good afternoon" if 12 <= hour < 18 else "Good evening")
-
-    # 1. 首发：先发送引导图片（同步发送，确保用户第一眼就看到）
+    # 第一步：图片 + 文案
     try:
         first_image_url = random.choice(config.IMAGE_LIBRARY['firstpng'])
         await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.3, 0.6))
@@ -196,77 +246,65 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     except Exception as e:
         logger.warning(f"Failed to send first guide image: {e}")
 
-    # 2. 立即先发首条文本
-    welcome_text = f"{greeting}, {user_name}! Aapka support ke liye shukriya. Maine yahan ek chhota exclusive space banaya hai jahan hum aur closely connect kar sakte hain."
-    await human_send_message(context, chat_id, welcome_text)
-
-    benefits_text = (
-        "Yahan pe kuch exclusive benefits ready hain:\n"
-        "1) High-accuracy prediction bot;\n"
-        "2) Cash rewards lucky draw;\n"
-        "3) Mobile giveaways.\n\n"
-        "Bas 2 simple steps complete karo, aur sab unlock ho jayega."
+    first_copy = (
+        "Guys, dhyaan se suno 🚨 Aaj main apna wealth secret share kar raha hoon 💰 – cars 🏎️, cash 💵, gold 🏆\n"
+        "Yeh sab aasman se nahi gira, black‑tech prediction robot 🤖 se kamaaya!\n"
+        "Isi ne mujhe step‑by‑step wealth ceiling todne me madad ki 💥\n"
+        "Aur mujhe mila – financial freedom 🤑\n"
+        "Kya tum bhi mere jaise financial freedom chahte ho? 💸\n"
+        "Bas mere steps follow karo, ek‑ek karke, tum bhi kar sakte ho ✅\n"
+        "Ready ho? 🔥"
     )
-    await human_send_message(context, chat_id, benefits_text)
+    await human_send_message(context, chat_id, first_copy)
 
-    # 3. 发送注册链接
+    await asyncio.sleep(random.uniform(1, 3))
+
+    # 第二步：注册（Hinglish）
     registration_link = bot_config.get('registration_link', 'Registration link not configured')
-    await human_send_message(context, chat_id, f"Step 1: Mere exclusive link se register karo 👇\n{registration_link}")
+    step2 = (
+        "Ab main tumhe step‑by‑step guide karunga 🧭\n"
+        "Step 1: Registration complete karo 📝\n"
+        f"Neeche wala link click karo 👇\n{registration_link}\n"
+        "Register ho jao, phir next step unlock hoga 🔓"
+    )
+    await human_send_message(context, chat_id, step2)
 
-    # 4. 将媒体发送放到后台，不阻塞文本到达
-    video_url = bot_config.get('video_url')
-    video_file_id = bot_config.get('video_file_id')
-    if video_url:
-        async def _bg_send_video():
-            try:
-                await indicate_action(context, chat_id, ChatAction.UPLOAD_VIDEO, random.uniform(0.4, 0.8))
-                if video_file_id:
-                    # 优先用持久化 file_id
-                    msg = await _retry_send(lambda: context.bot.send_video(chat_id=chat_id, video=video_file_id))
-                else:
-                    msg = await send_video_with_cache(context, chat_id, video_url)
-                    # 首次成功后持久化
-                    try:
-                        fid = getattr(getattr(msg, 'video', None), 'file_id', None)
-                        if fid:
-                            database.update_bot_file_ids(bot_config['bot_token'], video_file_id=fid)
-                            bot_config['video_file_id'] = fid
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.error(f"Failed to send video from URL (URL: {video_url}): {e}")
-        asyncio.create_task(_bg_send_video())
+    await asyncio.sleep(random.uniform(2, 3))
 
-    try:
-        # 从配置中随机选择一张引导图
-        find_id_image_url = random.choice(config.IMAGE_LIBRARY['find_id'])
-        image_file_id = bot_config.get('image_file_id')
-        async def _bg_send_photo():
-            try:
-                await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.4, 0.8))
-                if image_file_id:
-                    msg = await _retry_send(lambda: context.bot.send_photo(chat_id=chat_id, photo=image_file_id, caption="Registration ke baad, is image ko follow karke apna 9-digit ID dhoondo."))
-                else:
-                    msg = await send_photo_with_cache(context, chat_id, find_id_image_url, caption="Registration ke baad, is image ko follow karke apna 9-digit ID dhoondo.")
-                    try:
-                        pid = None
-                        if getattr(msg, 'photo', None):
-                            pid = msg.photo[-1].file_id
-                        if pid:
-                            database.update_bot_file_ids(bot_config['bot_token'], image_file_id=pid)
-                            bot_config['image_file_id'] = pid
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Failed to send 'find_id' image, please check config.py configuration: {e}")
-        asyncio.create_task(_bg_send_photo())
-    except (KeyError, IndexError, TypeError) as e:
-        logger.warning(f"无法发送'find_id'图片，请检查config.py配置: {e}")
+    # 第三步：确认是否已注册（按钮）
+    await _send_register_prompt(update, context, chat_id)
+    return AWAITING_REGISTER_CONFIRM
 
-    await human_send_message(context, chat_id, "Register karne ke baad apna 9-digit ID bhej do. Main turant access open kar dunga.")
 
-    return AWAITING_ID
+async def handle_register_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    chat_id = query.message.chat_id
+    bot_config = context.bot_data.get('config', {})
 
+    if choice == 'reg_yes':
+        # 进入第四步
+        await query.edit_message_reply_markup(reply_markup=None)
+        await asyncio.sleep(random.uniform(1, 2))
+        await _proceed_deposit_and_final(context, chat_id, bot_config)
+        return ConversationHandler.END
+    else:
+        # No：连发三条引导语（Hinglish），每条间隔1秒，然后再给按钮
+        await query.edit_message_reply_markup(reply_markup=None)
+        guides = [
+            "Zyada sochne se kuch nahi badalta 🤔. Pehle account register karo, main turant sikhaunga ki robot se paise kaise banane hain 💹. Ready? 🔥",
+            "Mauka sirf ek baar aata hai, abhi bhi kis baat ka intezaar? ⏳",
+            "Pehla kadam nahi loge to kabhi nahi pata chalega ki kitna aasan hai 👣.",
+        ]
+        for t in guides:
+            await human_send_message(context, chat_id, t)
+            await asyncio.sleep(1)
+        await _send_register_prompt(update, context, chat_id)
+        return AWAITING_REGISTER_CONFIRM
+
+
+# 保留旧的ID与充值确认逻辑（当前不再进入）
 
 async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理并验证用户发送的ID"""
@@ -281,7 +319,6 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _retry_send(lambda: update.message.reply_text("Great! Tumhara slot reserve kar diya. Ab sirf 200 rupees recharge karo, aur prediction bot turant unlock ho jayega."))
 
     try:
-        # --- 关键修改：直接从导入的config模块读取 ---
         deposit_video_url = random.choice(config.IMAGE_LIBRARY['deposit_guide'])
         deposit_file_id = bot_config.get('deposit_file_id')
         if deposit_file_id:
@@ -330,12 +367,10 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
     await human_send_message(context, query.message.chat_id, "Awesome! Ab main tumhare liye prediction bot unlock kar raha hoon (90%+ accuracy). Pehli wave ready hai!")
 
     bot_config = context.bot_data.get('config', {})
-    prediction_bot_link = bot_config.get('prediction_bot_link', 'Prediction bot link not configured')
-
+    channel_link = bot_config.get('channel_link') or 'Channel link not configured'
     final_message = (
-        "First set of predictions tumhare liye push ho chuka hai (90%+).\n"
-        "Zyada stable returns ke liye abhi join karo: \n"
-        f"{prediction_bot_link}"
+        "Access open ho chuka hai. Ab channel join karke signal follow karo:\n"
+        f"{channel_link}"
     )
     await human_send_message(context, query.message.chat_id, final_message)
 
@@ -360,6 +395,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 conversation_handler = ConversationHandler(
     entry_points=[CommandHandler("start", start)],
     states={
+        AWAITING_REGISTER_CONFIRM: [CallbackQueryHandler(handle_register_decision, pattern="^reg_(yes|no)$")],
         AWAITING_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_id)],
         AWAITING_RECHARGE_CONFIRM: [CallbackQueryHandler(handle_recharge_confirm, pattern="^confirm_recharge_yes$")],
     },
