@@ -22,6 +22,7 @@ from .admin_handlers import (
     delete_bot_execute,
     delete_bot_cancel
 )
+from .channel_supervisor import ChannelSupervisor
 from .handlers import conversation_handler
 
 # --- 2. 日志配置 ---
@@ -88,6 +89,7 @@ async def startup():
     database.initialize_db()
     manager = BotManager()
     axi_manager = AxiBotManager() if AxiBotManager is not None else None
+    channel_supervisor = ChannelSupervisor()
 
     # --- 关键修改：优化了管理员菜单 ---
     bot_commands = [
@@ -106,6 +108,7 @@ async def startup():
     admin_app.bot_data['manager'] = manager
     if axi_manager is not None:
         admin_app.bot_data['axi_manager'] = axi_manager
+    admin_app.bot_data['channel_supervisor'] = channel_supervisor
 
     # 注册所有管理员处理器
     admin_app.add_handler(CommandHandler(["start", "help"], start_admin))

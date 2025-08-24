@@ -104,15 +104,11 @@ async def send_now_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     token = query.data.split('_', 1)[-1]
-    axi_manager = context.application.bot_data.get('axi_manager')
-    if not axi_manager:
+    supervisor = context.application.bot_data.get('channel_supervisor')
+    if not supervisor:
         await query.edit_message_text("发送服务未启动。")
         return
-    ok = await axi_manager.trigger_send_now(token)
-    # 标记该机器人已通过 sendnow 启动，允许进入周期发送
-    app = axi_manager.running_bots.get(token)
-    if app:
-        app.bot_data['started_by_sendnow'] = True
+    ok = await supervisor.send_now(token)
     if ok:
         await query.edit_message_text("✅ 已触发一次发送。")
     else:
@@ -333,13 +329,11 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
         manager = context.application.bot_data['manager']
         await manager.start_agent_bot(new_bot_config)
 
-        # 若为频道带单：仅注册但不自动发；需管理员执行 /sendnow 后开始日常发送
+        # 若为频道带单：交给 ChannelSupervisor 动态启动；不自动发
         if bot_role == BOT_TYPE_CHANNEL:
-            axi_manager = context.application.bot_data.get('axi_manager')
-            if axi_manager is not None:
-                app = await axi_manager.start_bot(new_bot_config)
-                if app:
-                    app.bot_data['started_by_sendnow'] = False
+            supervisor = context.application.bot_data.get('channel_supervisor')
+            if supervisor is not None:
+                await supervisor.start(new_bot_config)
         await context.bot.send_message(chat_id=chat_id, text=f"✅ 成功！代理 '{name}' 的机器人已添加并上线。")
     except Exception as e:
         logger.error(f"动态启动机器人失败: {e}")
@@ -440,10 +434,10 @@ async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if bot_config and bot_config.get('bot_token'):
         await manager.stop_agent_bot(bot_config['bot_token'])
         # 若为频道带单，同时停止对应频道发送端
-        axi_manager = context.application.bot_data.get('axi_manager')
-        if axi_manager is not None:
+        supervisor = context.application.bot_data.get('channel_supervisor')
+        if supervisor is not None:
             try:
-                await axi_manager.stop_bot(bot_config['bot_token'])
+                await supervisor.stop(bot_config['bot_token'])
             except Exception:
                 pass
     await query.edit_message_text(f"正在从数据库中删除 '{agent_name}'...")
