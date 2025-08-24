@@ -150,6 +150,10 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"[{context.bot_data.get('agent_name')}] [SEND] skip because is_signal_active=True (last={age}s)")
             return
 
+    # 抢占锁：在真正发送前先设置为占用，避免并发重复触发
+    context.bot_data['is_signal_active'] = True
+    context.bot_data['last_signal_time'] = time.time()
+
     try:
         call_count = context.bot_data.get('signal_call_count', 0) + 1
         context.bot_data['signal_call_count'] = call_count
@@ -184,9 +188,6 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(random.uniform(1, 2))  # 减少等待时间
             except Exception as e:
                 logger.warning(f"[{agent_name}] 发送图片失败: {e}")
-
-        context.bot_data['is_signal_active'] = True
-        context.bot_data['last_signal_time'] = time.time()
 
         # 不再发送“检查信号”提示，直接进入信号内容
         await asyncio.sleep(random.uniform(1, 2))
