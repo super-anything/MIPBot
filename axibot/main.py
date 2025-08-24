@@ -46,6 +46,12 @@ def _normalize_channel_link(channel_link: str | None) -> str | None:
     if not channel_link:
         return None
     text = channel_link.strip()
+    # 如果是纯数字的频道ID（常见以-100开头），转换为 int，减少 API 兼容性问题
+    try:
+        if text.startswith("-100") and text[1:].isdigit():
+            return int(text)
+    except Exception:
+        pass
     if text.startswith("@"):
         return text
     if text.startswith("https://") or text.startswith("http://"):
@@ -123,6 +129,8 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
             force = True
     except Exception:
         force = False
+
+    logger.info(f"[{context.bot_data.get('agent_name')}] 准备执行发送任务 -> force={force}, target={context.bot_data.get('target_chat_id')}")
 
     if not force and context.bot_data.get('is_signal_active', False):
         logger.info(f"[{context.bot_data.get('agent_name')}] 检测到已有信号进行中，跳过。")
