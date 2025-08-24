@@ -86,7 +86,6 @@ def generate_signal_message(bot_config: dict | None = None) -> str:
 
     signal_text = (
         f"Entry Confirmed!\n"
-        f"Agent: {agent_name}\n"
         f"Mines Count: {mines_count}\n"
         f"Attempts: {attempts_count}\n"
         f"Valid for: 5 minutes\n\n"
@@ -294,36 +293,55 @@ class AxiBotManager:
             logger.error(f"停止机器人出错: {e}")
 
     async def check_bot_permissions(self, app, channel_id, bot_config=None):
-        """检查机器人在频道中的权限并测试发送消息"""
+        """检查机器人在频道中的权限（不发测试消息）。
+        逻辑：通过 get_chat_member 获取自身在该频道的权限；
+        - 若为管理员且 can_post_messages/能发帖 权限为真，则视为通过；
+        - 若为普通成员或无此权限，则视为失败。
+        """
         token = app.bot.token
         agent_name = app.bot_data.get('agent_name')
 
         try:
-            # 尝试发送测试消息并立即删除
-            test_msg = await app.bot.send_message(
-                chat_id=channel_id,
-                text="权限检查消息，将自动删除..."
-            )
-            await app.bot.delete_message(chat_id=channel_id, message_id=test_msg.message_id)
+            # 通过 get_me 拿到自身 id
+            me = await app.bot.get_me()
+            member = await app.bot.get_chat_member(chat_id=channel_id, user_id=me.id)
+            status = getattr(member, 'status', None)
 
-            # 测试成功，重置错误计数
-            if token in self.bot_status:
-                self.bot_status[token]['error_count'] = 0
-                self.bot_status[token]['last_check'] = time.time()
+            # Telegram 频道：需要管理员且可发帖
+            can_post = True
+            # 不同类型的 ChatMember 上权限字段可能不同，做容错读取
+            for field in (
+                'can_post_messages',       # 频道发帖
+                'can_send_messages',       # 超级群发言
+            ):
+                if hasattr(member, field):
+                    can_post = bool(getattr(member, field))
+                    break
 
-            logger.info(f"机器人 {agent_name} 在频道 {channel_id} 中权限正常")
-            return True
+            if status in ("administrator", "creator") and can_post:
+                # 权限通过，重置错误计数
+                if token in self.bot_status:
+                    self.bot_status[token]['error_count'] = 0
+                    self.bot_status[token]['last_check'] = time.time()
+                logger.info(f"机器人 {agent_name} 在频道 {channel_id} 权限正常（{status}）")
+                return True
+            else:
+                logger.error(f"机器人 {agent_name} 在频道 {channel_id} 权限不足（status={status}, can_post={can_post}）")
+                # 记录错误
+                if token not in self.bot_status:
+                    self.bot_status[token] = {"error_count": 0, "last_error": 0, "last_check": time.time()}
+                self.bot_status[token]['error_count'] += 1
+                self.bot_status[token]['last_error'] = time.time()
+                return False
 
         except (Forbidden, BadRequest) as e:
-            # 记录错误
             if token not in self.bot_status:
                 self.bot_status[token] = {"error_count": 0, "last_error": 0, "last_check": time.time()}
-
             self.bot_status[token]['error_count'] += 1
             self.bot_status[token]['last_error'] = time.time()
 
             if isinstance(e, Forbidden):
-                logger.error(f"机器人 {agent_name} 没有在频道 {channel_id} 中发送消息的权限")
+                logger.error(f"机器人 {agent_name} 没有在频道 {channel_id} 的访问权限")
             elif "chat not found" in str(e).lower():
                 logger.error(f"频道 {channel_id} 不存在或机器人 {agent_name} 不在频道中")
             else:
