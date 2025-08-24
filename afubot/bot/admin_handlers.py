@@ -355,18 +355,21 @@ async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    bot_id_str = query.data.split('_')[-1]
+    bot_ref = query.data.split('_')[-1]
+    bot_config = None
+    # 优先按 id 解析；失败则回退按 token
     try:
-        bot_id = int(bot_id_str)
+        bot_id = int(bot_ref)
+        bot_config = database.get_bot_by_id(bot_id)
     except ValueError:
-        await query.edit_message_text("错误：回调参数异常，无法识别要删除的机器人。")
-        return
-    bot_config = database.get_bot_by_id(bot_id)
+        bot_config = database.get_bot_by_token(bot_ref)
     if not bot_config:
         await query.edit_message_text("错误：找不到该机器人，可能已被删除。")
         return
+    # 回调继续携带 id；若当前只有 token 则携带 token
+    confirm_ref = str(bot_config.get('id')) if bot_config and bot_config.get('id') is not None else bot_ref
     keyboard = [[
-        InlineKeyboardButton("✅ 是的，立即删除", callback_data=f"delbot_execute_{bot_id}"),
+        InlineKeyboardButton("✅ 是的，立即删除", callback_data=f"delbot_execute_{confirm_ref}"),
         InlineKeyboardButton("❌ 取消", callback_data="delbot_cancel")
     ]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -380,13 +383,15 @@ async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    bot_id_str = query.data.split('_')[-1]
+    bot_ref = query.data.split('_')[-1]
+    # 兼容老按钮：优先按 id，失败则按 token
+    bot_config = None
+    bot_id = None
     try:
-        bot_id = int(bot_id_str)
+        bot_id = int(bot_ref)
+        bot_config = database.get_bot_by_id(bot_id)
     except ValueError:
-        await query.edit_message_text("错误：回调参数异常，删除已中止。")
-        return
-    bot_config = database.get_bot_by_id(bot_id)
+        bot_config = database.get_bot_by_token(bot_ref)
     agent_name = html.escape(bot_config['agent_name']) if bot_config else "未知"
     await query.edit_message_text(f"正在停止机器人 '{agent_name}'...")
     manager = context.application.bot_data['manager']
@@ -395,11 +400,14 @@ async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(f"正在从数据库中删除 '{agent_name}'...")
     success = False
     if bot_config:
-        success = database.delete_bot_by_id(bot_id)
+        if bot_id is not None:
+            success = database.delete_bot_by_id(bot_id)
+        else:
+            success = database.delete_bot(bot_config['bot_token'])
     if success:
         await query.edit_message_text(f"✅ 代理机器人 '{agent_name}' 已被成功删除。")
     else:
-        await query.edit_message_text(f"❌ 删除失败！在数据库中找不到Token为该值的机器人。")
+        await query.edit_message_text("❌ 删除失败！数据库中未找到相应机器人。")
 
 
 async def delete_bot_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

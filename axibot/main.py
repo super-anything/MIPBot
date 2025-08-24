@@ -331,6 +331,9 @@ class AxiBotManager:
                 if prev_error_count > 0:
                     try:
                         logger.info(f"[{agent_name}] 权限恢复，立即触发一次发送任务以验证")
+                        # 清除可能残留的“信号进行中”标记，确保不会被跳过
+                        app.bot_data['is_signal_active'] = False
+                        app.bot_data['last_signal_time'] = 0
                         app.job_queue.run_once(_send_signal, when=2)
                     except Exception as e:
                         logger.warning(f"[{agent_name}] 触发恢复发送失败: {e}")
