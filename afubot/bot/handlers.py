@@ -7,7 +7,7 @@ from . import config
 from . import database
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
-from telegram.error import RetryAfter, TimedOut, NetworkError
+from telegram.error import RetryAfter, TimedOut, NetworkError, BadRequest
 from telegram.ext import (
     ContextTypes,
     CommandHandler,
@@ -278,7 +278,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def handle_register_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer()
+    # 回调按钮容错：旧/无效 query 直接友好提示并结束
+    try:
+        await query.answer()
+    except BadRequest as e:
+        text = str(e).lower()
+        if "query is too old" in text or "query id is invalid" in text:
+            try:
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Bhai, yeh button expire ho chuka hai. /start bhejo aur fir se shuru karo ✅")
+            except Exception:
+                pass
+            return ConversationHandler.END
+        else:
+            raise
     choice = query.data
     chat_id = query.message.chat_id
     bot_config = context.bot_data.get('config', {})
@@ -353,7 +365,19 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
     """处理用户确认充值"""
     query = update.callback_query
     user_id = query.from_user.id
-    await query.answer()
+    # 回调按钮容错：旧/无效 query 直接忽略并提示
+    try:
+        await query.answer()
+    except BadRequest as e:
+        text = str(e).lower()
+        if "query is too old" in text or "query id is invalid" in text:
+            try:
+                await context.bot.send_message(chat_id=query.message.chat_id, text="Bhai, yeh button expire ho chuka hai. /start bhejo aur fir se shuru karo ✅")
+            except Exception:
+                pass
+            return ConversationHandler.END
+        else:
+            raise
 
     # 清理提醒任务
     job_name_key = f'recharge_nag_job_name_{user_id}'
