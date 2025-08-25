@@ -56,8 +56,10 @@ class BotManager:
             agent_app.add_handler(conversation_handler)
 
             await agent_app.initialize()
-            await agent_app.updater.start_polling(drop_pending_updates=True)
+            logger.info(f"代理机器人 '{name}' initialize 完成，准备启动应用…")
             await agent_app.start()
+            logger.info(f"代理机器人 '{name}' start 完成，开启轮询…")
+            await agent_app.updater.start_polling(drop_pending_updates=True)
 
             self.running_bots[token] = agent_app
             logger.info(f"代理机器人 '{name}' 已成功启动并开始轮询。")
