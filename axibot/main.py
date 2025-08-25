@@ -119,7 +119,7 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"[{context.bot_data.get('agent_name')}] 信号已结束，锁已解除。")
     try:
         # 在解锁后，自动安排下一次发送，避免“仅首发一次就停止”的体验
-        delay = random.uniform(8, 15)
+        delay = random.uniform(600, 800)
         context.job_queue.run_once(_send_signal, when=delay)
         logger.info(f"[{context.bot_data.get('agent_name')}] 已计划在 {delay:.1f}s 后再次触发发送。")
     except Exception as e:
