@@ -20,7 +20,7 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-PROBABILITY_PER_MINUTE = 1501 / (24 * 60)
+PROBABILITY_PER_MINUTE = 60 / (24 * 60)
 GRID_SIZE_U = 6
 GRID_SIZE_D = 5
 TOTAL_CELLS = GRID_SIZE_U * GRID_SIZE_D
@@ -212,7 +212,7 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"[{context.bot_data.get('agent_name')}] 发送信号失败: {e}")
         context.bot_data['is_signal_active'] = False
-        
+
 
 async def _schedule_checker(context: ContextTypes.DEFAULT_TYPE):
     # 如果机器人被暂停，则跳过发送
