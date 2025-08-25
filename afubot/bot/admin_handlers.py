@@ -59,17 +59,21 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     manager = context.application.bot_data['manager']
     running_tokens = manager.running_bots.keys()
 
-    message_parts = ["<b>机器人列表:</b>\n\n"]
+    # 分页：按消息长度切分，避免超过 Telegram 的 4096 限制
+    header = "<b>机器人列表:</b>\n\n"
+    max_chars = 3500  # 保留余量
+    current_chunks = [header]
+    current_len = len(header)
+    pages: list[str] = []
+
     for bot in all_bots:
         run_status = "✅ 在线" if bot['bot_token'] in running_tokens else "❌ 离线"
 
         agent_name = html.escape(bot['agent_name'])
         reg_link = html.escape(bot['registration_link'])
-        # 频道链接现在可能不存在，这里可以移除或标记
-        channel_link = html.escape(bot.get('channel_link') or'未配置')
+        channel_link = html.escape(bot.get('channel_link') or '未配置')
         video_url = html.escape(bot['video_url'] or '未配置')
         image_url = html.escape(bot['image_url'] or '未配置')
-        # 预测机器人链接已移除展示
         bot_token = html.escape(bot['bot_token'])
 
         part = (
@@ -81,9 +85,22 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>Token:</b> <code>{bot_token}</code>\n"
             f"--------------------\n"
         )
-        message_parts.append(part)
 
-    await update.message.reply_text("".join(message_parts), parse_mode='HTML')
+        if current_len + len(part) > max_chars:
+            pages.append("".join(current_chunks))
+            current_chunks = [header, part]
+            current_len = len(header) + len(part)
+        else:
+            current_chunks.append(part)
+            current_len += len(part)
+
+    if current_chunks:
+        pages.append("".join(current_chunks))
+
+    # 逐页发送
+    for idx, content in enumerate(pages, start=1):
+        suffix = f"\n第 {idx}/{len(pages)} 页" if len(pages) > 1 else ""
+        await update.message.reply_text(content + suffix, parse_mode='HTML')
 
 
 # --- 强制触发一次发送 ---
@@ -389,14 +406,20 @@ async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not all_bots:
         await update.message.reply_text("数据库中还没有任何机器人可以删除。")
         return
-    keyboard = []
-    for bot in all_bots:
-        # 使用数据库自增 id 作为回调参数，避免 Token 过长或包含冒号导致平台截断
-        bot_id = bot.get('id') if isinstance(bot, dict) else bot.id
-        button = InlineKeyboardButton(bot['agent_name'], callback_data=f"delbot_confirm_{bot_id}")
-        keyboard.append([button])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("请选择您要删除的代理机器人：", reply_markup=reply_markup)
+
+    # 分页发送按钮，避免键盘/消息过长
+    page_size = 25
+    total = (len(all_bots) + page_size - 1) // page_size
+    for page_idx in range(total):
+        slice_bots = all_bots[page_idx * page_size:(page_idx + 1) * page_size]
+        keyboard = []
+        for bot in slice_bots:
+            bot_id = bot.get('id') if isinstance(bot, dict) else bot.id
+            button = InlineKeyboardButton(bot['agent_name'], callback_data=f"delbot_confirm_{bot_id}")
+            keyboard.append([button])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        text = "请选择您要删除的代理机器人：" if total == 1 else f"请选择您要删除的代理机器人（第{page_idx + 1}/{total}页）："
+        await update.message.reply_text(text, reply_markup=reply_markup)
 
 
 async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
