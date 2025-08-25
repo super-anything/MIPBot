@@ -21,7 +21,9 @@ ADMIN_BOT_TOKEN = os.getenv('ADMIN_BOT_TOKEN')
 
 # Admin user ids
 ADMIN_USER_IDS = [
-    8082148171, 8064152515, 6425667576
+    8082148171, 8064152515, 6425667576,
+    7089692292,#阿希  @bella3rrvip
+    7058607367 #程浩 @VGXinaVIP9988
 ]
 
 # --- Media assets shared by both bots ---
