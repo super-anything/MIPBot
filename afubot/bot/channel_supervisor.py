@@ -59,6 +59,20 @@ class ChannelSupervisor:
         if not app:
             return
         try:
+            # 先清理该应用上的所有计划任务，避免停止过程中仍有 Job 触发
+            try:
+                for job in list(app.job_queue.jobs()):
+                    try:
+                        job.schedule_removal()
+                    except Exception:
+                        pass
+                for job in app.job_queue.get_jobs_by_name("_schedule_checker"):
+                    try:
+                        job.schedule_removal()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             if app.updater and app.updater._running:
                 await app.updater.stop()
             await app.stop()

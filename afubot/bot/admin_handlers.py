@@ -151,7 +151,7 @@ async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("Token格式似乎不正确，请重新发送。")
         return GETTING_BOT_TOKEN
     context.user_data['bot_token'] = token
-    
+
     # 新增：询问机器人类型
     keyboard = [
         [InlineKeyboardButton("私聊引导注册", callback_data=f"bottype_{BOT_TYPE_GUIDE}")],
@@ -168,10 +168,10 @@ async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def get_bot_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    
+
     bot_type = query.data.split('_')[1]  # bottype_private 或 bottype_channel
     context.user_data['bot_role'] = bot_type
-    
+
     if bot_type == BOT_TYPE_GUIDE:
         # 私聊引导注册类型需要注册链接
         await query.edit_message_text("已选择【私聊引导注册】类型。\n现在，请把这个代理的专属【注册链接】发给我。")
@@ -179,15 +179,15 @@ async def get_bot_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     else:  # BOT_TYPE_CHANNEL
         # 频道带单类型直接跳过注册链接，只需要频道ID
         context.user_data['reg_link'] = ""  # 设置空注册链接
-        await query.edit_message_text("已选择【频道带单】类型。\n现在，请输入【带单频道链接】（如 @your_channel 或 https://t.me/your_channel 或直接输入频道ID）。")
+        await query.edit_message_text("已选择【频道带单】类型。\n现在，请输入【带单频道链接】（必须输入频道ID！！！）。")
         return GETTING_CHANNEL_LINK
 
 
 async def get_reg_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['reg_link'] = update.message.text
-    
+
     # 私聊引导注册类型需要频道链接
-    await update.message.reply_text("注册链接已收到。\n现在，请输入【带单频道链接】（如 @your_channel 或 https://t.me/your_channel 或直接输入频道ID）。")
+    await update.message.reply_text("注册链接已收到。\n现在，请输入【带单频道链接】（如https://t.me/your_channel）。")
     return GETTING_CHANNEL_LINK
 
 
@@ -195,12 +195,12 @@ async def get_channel_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     channel_link = (update.message.text or "").strip()
     # 允许任意文本，后续由 axibot 进行规范化处理
     context.user_data['channel_link'] = channel_link
-    
+
     # 区分不同类型的后续流程
     if context.user_data.get('bot_role') == BOT_TYPE_GUIDE:
         # 引导类型已收集完所需信息，直接跳过游戏链接
         context.user_data['play_url'] = ""
-        
+
         # 直接到视频URL
         keyboard = [
             [InlineKeyboardButton("跳过", callback_data="skip_video")]
@@ -219,19 +219,19 @@ async def get_channel_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['play_url'] = (update.message.text or "").strip()
-    
+
     # 频道类型到此为止，不需要视频和图片
     if context.user_data.get('bot_role') == BOT_TYPE_CHANNEL:
         # 频道带单类型已完成所有必要配置
         context.user_data['video_url'] = None
         context.user_data['image_url'] = None
-        
+
         name = context.user_data['agent_name']
         token = context.user_data['bot_token']
         reg_link = context.user_data['reg_link']
         play_url = context.user_data.get('play_url')
         video_url = context.user_data.get('video_url')
-        image_url = context.user_data.get('image_url') 
+        image_url = context.user_data.get('image_url')
         prediction_bot_link = None
         channel_link = context.user_data.get('channel_link') or ""
         bot_role = context.user_data.get('bot_role') or 'private'
@@ -255,7 +255,7 @@ async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
         context.user_data.clear()
         return ConversationHandler.END
-    
+
     # 私聊引导类型继续收集媒体
     keyboard = [
         [InlineKeyboardButton("跳过", callback_data="skip_video")]
@@ -284,7 +284,7 @@ async def get_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 reply_markup=reply_markup
             )
         return GETTING_IMAGE_URL
-    
+
     # 文本消息处理
     url_input = update.message.text
     if url_input and url_input.lower() in ["跳过", "skip"]:
@@ -313,7 +313,7 @@ async def get_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # 处理回调查询（按钮点击）和文本消息两种情况
     image_url = None
-    
+
     if update.callback_query:
         query = update.callback_query
         await query.answer()

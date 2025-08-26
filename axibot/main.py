@@ -326,6 +326,20 @@ class AxiBotManager:
 
         app = self.running_bots[token]
         try:
+            # 停止前先移除该应用的所有计划任务，避免停止后仍触发
+            try:
+                for job in list(app.job_queue.jobs()):
+                    try:
+                        job.schedule_removal()
+                    except Exception:
+                        pass
+                for job in app.job_queue.get_jobs_by_name("_schedule_checker"):
+                    try:
+                        job.schedule_removal()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             if app.updater and app.updater._running:
                 await app.updater.stop()
             await app.stop()
