@@ -192,7 +192,7 @@ def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None
         conn.close()
 
 
-def update_bot_file_ids(token: str, video_file_id: str | None = None, image_file_id: str | None = None, deposit_file_id: str | None = None):
+def update_bot_file_ids(token: str, video_file_id: str | None = None, image_file_id: str | None = None, deposit_file_id: str | None = None, sticker_file_id: str | None = None):
     """按需更新某个机器人的媒体 file_id 字段。不会覆盖为 None 的字段。"""
     conn = get_db_connection()
     try:
@@ -207,6 +207,9 @@ def update_bot_file_ids(token: str, video_file_id: str | None = None, image_file
         if deposit_file_id is not None:
             fields.append("deposit_file_id = %s" if DB_BACKEND == "mysql" else "deposit_file_id = ?")
             values.append(deposit_file_id)
+        if sticker_file_id is not None:
+            fields.append("sticker_file_id = %s" if DB_BACKEND == "mysql" else "sticker_file_id = ?")
+            values.append(sticker_file_id)
         if not fields:
             return False
         values.append(token)

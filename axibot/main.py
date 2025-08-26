@@ -102,7 +102,34 @@ def generate_signal_message(bot_config: dict | None = None) -> str:
 
 
 async def _send_5_min_warning(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="💎💎💎 Only 5 minutes left 💎💎💎")
+    chat_id = context.bot_data['target_chat_id']
+    bot_conf = context.bot_data.get('bot_config', {}) or {}
+    sticker_id = bot_conf.get('sticker_file_id')
+    # 若有缓存的 sticker_file_id 直接发送；否则尝试用本地 .tgs 上传一次并回写数据库
+    if sticker_id:
+        try:
+            await context.bot.send_sticker(chat_id, sticker=sticker_id)
+        except Exception:
+            pass
+    else:
+        try:
+            from pathlib import Path
+            tgs_path = Path(__file__).resolve().parent / 'facai.tgs'
+            if tgs_path.exists():
+                with open(tgs_path, 'rb') as f:
+                    msg = await context.bot.send_sticker(chat_id, sticker=f)
+                fid = getattr(getattr(msg, 'sticker', None), 'file_id', None)
+                if fid:
+                    try:
+                        from afubot.bot import database as afu_db
+                        afu_db.update_bot_file_ids(bot_conf.get('bot_token'), sticker_file_id=fid)
+                    except Exception:
+                        pass
+                    bot_conf['sticker_file_id'] = fid
+                    context.bot_data['bot_config'] = bot_conf
+        except Exception:
+            pass
+    await context.bot.send_message(chat_id=chat_id, text="💎💎💎 Only 5 minutes left 💎💎💎")
 
 
 async def _send_3_min_warning(context: ContextTypes.DEFAULT_TYPE):
