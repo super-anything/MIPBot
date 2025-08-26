@@ -242,7 +242,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         first_image_url = random.choice(config.IMAGE_LIBRARY['firstpng'])
         await indicate_action(context, chat_id, ChatAction.UPLOAD_PHOTO, random.uniform(0.3, 0.6))
-        await send_photo_with_cache(context, chat_id, first_image_url)
+        # 优先使用数据库缓存的 file_id；若无则用 URL 发送并回写数据库
+        fid = (context.bot_data.get('config') or {}).get('first_image_file_id')
+        if fid:
+            try:
+                await _retry_send(lambda: context.bot.send_photo(chat_id=chat_id, photo=fid))
+            except Exception:
+                # 若 file_id 发送失败，回退到 URL
+                msg = await send_photo_with_cache(context, chat_id, first_image_url)
+                try:
+                    fid = getattr(msg.photo[-1], 'file_id', None)
+                    if fid:
+                        database.update_bot_file_ids((context.bot_data.get('config') or {}).get('bot_token'), first_image_file_id=fid)
+                        context.bot_data['config']['first_image_file_id'] = fid
+                except Exception:
+                    pass
+        else:
+            msg = await send_photo_with_cache(context, chat_id, first_image_url)
+            try:
+                fid = getattr(msg.photo[-1], 'file_id', None)
+                if fid:
+                    database.update_bot_file_ids((context.bot_data.get('config') or {}).get('bot_token'), first_image_file_id=fid)
+                    context.bot_data.setdefault('config', {})['first_image_file_id'] = fid
+            except Exception:
+                pass
     except Exception as e:
         logger.warning(f"Failed to send first guide image: {e}")
 
