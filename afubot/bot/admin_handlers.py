@@ -237,7 +237,7 @@ async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         bot_role = context.user_data.get('bot_role') or 'private'
 
         await update.message.reply_text("正在保存所有配置并尝试启动机器人...")
-        new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role)
+        new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role)
 
         if not new_bot_config:
             await update.message.reply_text("❌ 保存失败！这个Bot Token可能已经存在于数据库中。")
@@ -341,7 +341,7 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
     bot_role = context.user_data.get('bot_role') or 'private'
 
     await context.bot.send_message(chat_id=chat_id, text="正在保存所有配置并尝试启动机器人...")
-    new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role)
+    new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role)
 
     if not new_bot_config:
         await context.bot.send_message(chat_id=chat_id, text="❌ 保存失败！这个Bot Token可能已经存在于数据库中。")
