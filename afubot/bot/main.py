@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import platform,random
-from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler
+from pathlib import Path
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler, PicklePersistence
 from telegram.request import HTTPXRequest
 
 # 引入频道发送管理器
@@ -24,7 +25,7 @@ from .admin_handlers import (
     delete_bot_cancel
 )
 from .channel_supervisor import ChannelSupervisor
-from .handlers import conversation_handler
+from .handlers import conversation_handler, nag_recharge_callback, NAG_INTERVAL_SECONDS
 
 # --- 2. 日志配置 ---
 logging.basicConfig(
@@ -49,8 +50,18 @@ class BotManager:
 
         try:
             request = HTTPXRequest(connection_pool_size=100)
-            agent_app = ApplicationBuilder().token(token).request(request).build()
+            # 为每个机器人启用基于文件的持久化，避免重启导致会话中断
+            persist_dir = Path(__file__).resolve().parent / 'persist'
+            persist_dir.mkdir(parents=True, exist_ok=True)
+            persist_file = persist_dir / f"conv_{token.split(':')[0]}.bin"
+            persistence = PicklePersistence(filepath=str(persist_file))
+            agent_app = ApplicationBuilder().token(token).request(request).persistence(persistence).build()
             agent_app.bot_data['config'] = bot_config
+            # 确保运行期也能根据 token 从数据库回源
+            try:
+                agent_app.bot_data['config']['bot_token'] = token
+            except Exception:
+                pass
 
             # --- 关键修改：加载总对话处理器 ---
             agent_app.add_handler(conversation_handler)
@@ -59,10 +70,49 @@ class BotManager:
             logger.info(f"代理机器人 '{name}' initialize 完成，准备启动应用…")
             await agent_app.start()
             logger.info(f"代理机器人 '{name}' start 完成，开启轮询…")
-            await agent_app.updater.start_polling(drop_pending_updates=True)
+            # 私聊引导：不丢弃待处理更新，减少重启窗口期间用户点击丢失
+            await agent_app.updater.start_polling(drop_pending_updates=False)
 
             self.running_bots[token] = agent_app
             logger.info(f"代理机器人 '{name}' 已成功启动并开始轮询。")
+
+            # --- 重启后自动恢复未完成对话到相应阶段，并继续发送提示/按钮 ---
+            async def resume_conversations():
+                try:
+                    sessions = database.list_user_conversations(token) or []
+                    for row in sessions:
+                        # row 兼容 MySQL(dict) 与 SQLite(dict)
+                        chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+                        state = row.get('state') if isinstance(row, dict) else row[1]
+                        try:
+                            if state == 'AWAITING_REGISTER_CONFIRM':
+                                # 避免重复补发按钮，由用户点击旧按钮继续
+                                pass
+                            elif state == 'AWAITING_ID':
+                                # 避免重复提示，必要时由用户输入触发
+                                pass
+                            elif state == 'AWAITING_RECHARGE_CONFIRM':
+                                # 重新安排提醒任务
+                                job_name = f"recharge_nag_{chat_id}_{chat_id}"
+                                agent_app.job_queue.run_once(
+                                    nag_recharge_callback,
+                                    NAG_INTERVAL_SECONDS,
+                                    chat_id=chat_id,
+                                    user_id=chat_id,
+                                    name=job_name
+                                )
+                                # 初始化 user_data 以便后续取消任务
+                                try:
+                                    agent_app.user_data[chat_id]['recharge_nag_attempts'] = 0
+                                    agent_app.user_data[chat_id][f'recharge_nag_job_name_{chat_id}'] = job_name
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            logger.warning(f"恢复会话到 {state} 阶段失败 chat_id={chat_id}: {e}")
+                except Exception as e:
+                    logger.error(f"恢复该机器人会话时出错: {e}")
+
+            agent_app.create_task(resume_conversations())
         except Exception as e:
             logger.error(f"代理机器人 '{name}' ({token}) 启动时出现错误: {e}")
 

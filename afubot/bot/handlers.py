@@ -140,13 +140,17 @@ async def indicate_action(context: ContextTypes.DEFAULT_TYPE, chat_id, action: C
         pass
 
 
-async def human_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id, text: str, parse_mode: str | None = None):
-    # 首条消息：快速；其后：更长的拟人延时
-    if not context.user_data.get('first_text_sent'):
-        seconds = _estimate_typing_seconds_fast(text)
-        context.user_data['first_text_sent'] = True
+async def human_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id, text: str, parse_mode: str | None = None, fast: bool = False):
+    # 新增 fast 模式：用于回调场景降低人为延迟，提升响应速度
+    if fast:
+        seconds = 0.12
     else:
-        seconds = _estimate_typing_seconds_slow(text)
+        # 首条消息：快速；其后：更长的拟人延时
+        if not context.user_data.get('first_text_sent'):
+            seconds = _estimate_typing_seconds_fast(text)
+            context.user_data['first_text_sent'] = True
+        else:
+            seconds = _estimate_typing_seconds_slow(text)
     await indicate_action(context, chat_id, ChatAction.TYPING, seconds)
     return await _retry_send(lambda: context.bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode))
 
@@ -231,12 +235,63 @@ async def _proceed_deposit_and_final(context: ContextTypes.DEFAULT_TYPE, chat_id
     await human_send_message(context, chat_id, final_text)
 
 
-# --- 对话流程函数 ---
+# --- 对话流程函数与恢复逻辑 ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """处理 /start 命令，作为对话的入口点（重写为分步脚本）"""
     chat_id = update.effective_chat.id
     bot_config = context.bot_data.get('config', {})
+    # 兜底：若未携带或缺少关键链接信息，则从数据库按 token 拉取并回填
+    try:
+        needs_reload = (not bot_config) or (not bot_config.get('registration_link')) or (bot_config.get('channel_link') is None)
+        if needs_reload:
+            token_from_bot = getattr(context.bot, 'token', None)
+            if token_from_bot:
+                cfg = database.get_bot_by_token(token_from_bot)
+                if cfg:
+                    context.bot_data['config'] = cfg
+                    bot_config = cfg
+                else:
+                    logger.warning("无法通过 token 从数据库加载机器人配置。")
+            else:
+                logger.warning("context.bot.token 不可用，无法回源加载机器人配置。")
+    except Exception as e:
+        logger.error(f"回源加载机器人配置失败: {e}")
+
+    # —— 从数据库恢复用户会话（若存在） ——
+    try:
+        token = bot_config.get('bot_token')
+        if token:
+            conv = database.get_user_conversation(token, chat_id)
+            if conv:
+                state = conv.get('state')
+                if state == 'AWAITING_REGISTER_CONFIRM':
+                    # 已由恢复流程统一补发过按钮；此处避免重复发送
+                    return AWAITING_REGISTER_CONFIRM
+                elif state == 'AWAITING_ID':
+                    # 避免重复提示；直接恢复到等待输入状态
+                    return AWAITING_ID
+                elif state == 'AWAITING_RECHARGE_CONFIRM':
+                    # 仅补挂提醒任务（若未挂），避免重复发送按钮
+                    try:
+                        user_id = update.effective_user.id
+                        job_name_key = f'recharge_nag_job_name_{user_id}'
+                        if job_name_key not in context.user_data:
+                            context.user_data['recharge_nag_attempts'] = 0
+                            job_name = f'recharge_nag_{chat_id}_{user_id}'
+                            context.job_queue.run_once(
+                                nag_recharge_callback,
+                                NAG_INTERVAL_SECONDS,
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                name=job_name
+                            )
+                            context.user_data[job_name_key] = job_name
+                    except Exception:
+                        pass
+                    return AWAITING_RECHARGE_CONFIRM
+    except Exception:
+        pass
 
     # 第一步：图片 + 文案
     try:
@@ -295,6 +350,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await asyncio.sleep(random.uniform(2, 3))
 
     # 第三步：确认是否已注册（按钮）
+    # 先写入会话状态到数据库，确保即便此刻进程被终止，记录也已存在
+    try:
+        token = bot_config.get('bot_token')
+        if token:
+            database.upsert_user_conversation(token, chat_id, 'AWAITING_REGISTER_CONFIRM', None)
+        else:
+            logger.warning("bot_config 缺少 bot_token，无法写入会话持久化记录。")
+    except Exception as e:
+        logger.error(f"写入会话持久化记录失败: {e}")
     await _send_register_prompt(update, context, chat_id)
     return AWAITING_REGISTER_CONFIRM
 
@@ -319,23 +383,55 @@ async def handle_register_decision(update: Update, context: ContextTypes.DEFAULT
     bot_config = context.bot_data.get('config', {})
 
     if choice == 'reg_yes':
-        # 进入第四步
+        # 进入第四步：先去键盘并快速反馈，再后台执行耗时流程
         await query.edit_message_reply_markup(reply_markup=None)
-        await asyncio.sleep(random.uniform(1, 2))
-        await _proceed_deposit_and_final(context, chat_id, bot_config)
+        await human_send_message(context, chat_id, "Got it! Proceeding to next steps...", fast=True)
+
+        async def proceed_async():
+            try:
+                await asyncio.sleep(random.uniform(0.3, 0.6))
+                await _proceed_deposit_and_final(context, chat_id, bot_config)
+            except Exception:
+                pass
+
+        context.application.create_task(proceed_async())
+        try:
+            token = bot_config.get('bot_token')
+            if token:
+                database.delete_user_conversation(token, chat_id)
+        except Exception:
+            pass
         return ConversationHandler.END
     else:
-        # No：连发三条引导语（Hinglish），每条间隔1秒，然后再给按钮
+        # No：去除键盘并快速反馈，引导与重发按钮放到后台执行
         await query.edit_message_reply_markup(reply_markup=None)
-        guides = [
-            "Zyada sochne se kuch nahi badalta 🤔. Pehle account register karo, main turant sikhaunga ki robot se paise kaise banane hain 💹. Ready? 🔥",
-            "Mauka sirf ek baar aata hai, abhi bhi kis baat ka intezaar? ⏳",
-            "Pehla kadam nahi loge to kabhi nahi pata chalega ki kitna aasan hai 👣.",
-        ]
-        for t in guides:
-            await human_send_message(context, chat_id, t)
-            await asyncio.sleep(1)
-        await _send_register_prompt(update, context, chat_id)
+        await human_send_message(context, chat_id, "No problem, I will guide you step by step.", fast=True)
+
+        # 先持久化到等待确认阶段，确保进程意外退出也能恢复
+        try:
+            token = bot_config.get('bot_token')
+            if token:
+                database.upsert_user_conversation(token, chat_id, 'AWAITING_REGISTER_CONFIRM', None)
+            else:
+                logger.warning("bot_config 缺少 bot_token，无法写入会话持久化记录。")
+        except Exception as e:
+            logger.error(f"写入会话持久化记录失败: {e}")
+
+        async def guide_async():
+            guides = [
+                "Zyada sochne se kuch nahi badalta 🤔. Pehle account register karo, main turant sikhaunga ki robot se paise kaise banane hain 💹. Ready? 🔥",
+                "Mauka sirf ek baar aata hai, abhi bhi kis baat ka intezaar? ⏳",
+                "Pehla kadam nahi loge to kabhi nahi pata chalega ki kitna aasan hai 👣.",
+            ]
+            try:
+                for t in guides:
+                    await human_send_message(context, chat_id, t)
+                    await asyncio.sleep(1)
+                await _send_register_prompt(update, context, chat_id)
+            except Exception:
+                pass
+
+        context.application.create_task(guide_async())
         return AWAITING_REGISTER_CONFIRM
 
 
@@ -447,5 +543,7 @@ conversation_handler = ConversationHandler(
         AWAITING_RECHARGE_CONFIRM: [CallbackQueryHandler(handle_recharge_confirm, pattern="^confirm_recharge_yes$")],
     },
     fallbacks=[CommandHandler("cancel", cancel)],
-    conversation_timeout=3600  # 1小时后对话自动超时结束
+    conversation_timeout=3600,  # 1小时后对话自动超时结束
+    name="guide_conversation",
+    persistent=True
 )

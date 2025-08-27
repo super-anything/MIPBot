@@ -51,12 +51,26 @@ def initialize_db():
                 play_url TEXT,
                 video_url TEXT,
                 image_url TEXT,
-                prediction_bot_link TEXT,
                 bot_role VARCHAR(32) NOT NULL DEFAULT 'private',
                 is_active TINYINT(1) NOT NULL DEFAULT 1,
                 video_file_id TEXT,
                 image_file_id TEXT,
-                deposit_file_id TEXT
+                deposit_file_id TEXT,
+                sticker_file_id TEXT,
+                first_image_file_id TEXT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """
+        )
+        # --- 会话持久化表（用户私聊） ---
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_conversations (
+                bot_token VARCHAR(255) NOT NULL,
+                chat_id BIGINT NOT NULL,
+                state VARCHAR(64) NOT NULL,
+                payload_json TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_token, chat_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """
         )
@@ -88,6 +102,23 @@ def initialize_db():
                 cursor.execute("ALTER TABLE bots ADD COLUMN bot_role VARCHAR(32) NOT NULL DEFAULT 'private'")
         except Exception:
             pass
+        # 兼容旧表：补充缺失的新列
+        for col, ddl in [
+            ("sticker_file_id", "ALTER TABLE bots ADD COLUMN sticker_file_id TEXT"),
+            ("first_image_file_id", "ALTER TABLE bots ADD COLUMN first_image_file_id TEXT"),
+        ]:
+            try:
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'bots' AND COLUMN_NAME = %s
+                    """,
+                    (MYSQL_DATABASE, col)
+                )
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute(ddl)
+            except Exception:
+                pass
     else:
         cursor.execute(
             """
@@ -100,25 +131,120 @@ def initialize_db():
                 play_url TEXT,
                 video_url TEXT,
                 image_url TEXT,
-                prediction_bot_link TEXT,
                 bot_role TEXT NOT NULL DEFAULT 'private',
                 is_active INTEGER NOT NULL DEFAULT 1,
                 video_file_id TEXT,
                 image_file_id TEXT,
-                deposit_file_id TEXT
+                deposit_file_id TEXT,
+                sticker_file_id TEXT,
+                first_image_file_id TEXT
             );
             """
         )
         # 兼容旧表：为缺失的列做补充
         cursor.execute("PRAGMA table_info('bots');")
         existing_cols = {row[1] for row in cursor.fetchall()}
-        for col in ("video_file_id", "image_file_id", "deposit_file_id", "play_url", "bot_role"):
+        for col in ("video_file_id", "image_file_id", "deposit_file_id", "play_url", "bot_role", "sticker_file_id", "first_image_file_id"):
             if col not in existing_cols:
                 cursor.execute(f"ALTER TABLE bots ADD COLUMN {col} TEXT")
+        # 会话持久化表
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_conversations (
+                bot_token TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                payload_json TEXT,
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (bot_token, chat_id)
+            );
+            """
+        )
 
     conn.commit()
     conn.close()
     print("数据库初始化完成。")
+
+
+# --- 用户会话持久化：CRUD ---
+def get_user_conversation(bot_token: str, chat_id: int):
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT state, payload_json FROM user_conversations WHERE bot_token=%s AND chat_id=%s", (bot_token, chat_id))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        else:
+            cursor = conn.cursor()
+            cursor.execute("SELECT state, payload_json FROM user_conversations WHERE bot_token=? AND chat_id=?", (bot_token, chat_id))
+            row = cursor.fetchone()
+            if row:
+                return {"state": row[0], "payload_json": row[1]}
+            return None
+    finally:
+        conn.close()
+
+
+def upsert_user_conversation(bot_token: str, chat_id: int, state: str, payload_json: str | None = None):
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO user_conversations (bot_token, chat_id, state, payload_json) VALUES (%s,%s,%s,%s) "
+                    "ON DUPLICATE KEY UPDATE state=VALUES(state), payload_json=VALUES(payload_json)",
+                    (bot_token, chat_id, state, payload_json)
+                )
+                conn.commit()
+        else:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO user_conversations (bot_token, chat_id, state, payload_json) VALUES (?,?,?,?) "
+                "ON CONFLICT(bot_token, chat_id) DO UPDATE SET state=excluded.state, payload_json=excluded.payload_json",
+                (bot_token, chat_id, state, payload_json)
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_user_conversation(bot_token: str, chat_id: int):
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM user_conversations WHERE bot_token=%s AND chat_id=%s", (bot_token, chat_id))
+                conn.commit()
+        else:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM user_conversations WHERE bot_token=? AND chat_id=?", (bot_token, chat_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def list_user_conversations(bot_token: str):
+    """列出某个机器人的所有用户会话记录（用于重启后恢复流程）。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT chat_id, state, payload_json FROM user_conversations WHERE bot_token=%s",
+                    (bot_token,)
+                )
+                return cursor.fetchall()
+        else:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT chat_id, state, payload_json FROM user_conversations WHERE bot_token=?",
+                (bot_token,)
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 
 def get_active_bots(role: str | None = None):
@@ -162,17 +288,17 @@ def get_all_bots():
         conn.close()
 
 
-def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, play_url: str | None = None, video_url: str = None, image_url: str = None, prediction_bot_link: str = None, bot_role: str = 'private'):
+def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, play_url: str | None = None, video_url: str = None, image_url: str = None, bot_role: str = 'private'):
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
             try:
                 with conn.cursor() as cursor:
                     sql = (
-                        "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                        "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, bot_role) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
                     )
-                    cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role))
+                    cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role))
                     conn.commit()
                     bot_id = cursor.lastrowid
                     return get_bot_by_id(bot_id)
@@ -181,10 +307,10 @@ def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None
         else:
             cursor = conn.cursor()
             sql = (
-                "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, bot_role) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, prediction_bot_link, bot_role))
+            cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role))
             conn.commit()
             bot_id = cursor.lastrowid
             return get_bot_by_id(bot_id)
