@@ -146,7 +146,7 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"[{context.bot_data.get('agent_name')}] 信号已结束，锁已解除。")
     try:
         # 在解锁后，自动安排下一次发送，避免“仅首发一次就停止”的体验
-        delay = random.uniform(60, 70)
+        delay = random.uniform(600, 800)
         context.job_queue.run_once(_send_signal, when=delay)
         logger.info(f"[{context.bot_data.get('agent_name')}] 已计划在 {delay:.1f}s 后再次触发发送。")
     except Exception as e:
@@ -275,9 +275,9 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         job_queue = context.job_queue
         # 恢复完整倒计时提醒
         job_queue.run_once(_send_5_min_warning, 3)
-        job_queue.run_once(_send_3_min_warning, 12)  #生产为120
-        job_queue.run_once(_send_1_min_warning, 24) #生产为240
-        job_queue.run_once(_send_success_and_unlock, 30) #生产为300
+        job_queue.run_once(_send_3_min_warning, 120)  #生产为120
+        job_queue.run_once(_send_1_min_warning, 240) #生产为240
+        job_queue.run_once(_send_success_and_unlock, 300) #生产为300
 
     except Exception as e:
         logger.error(f"[{context.bot_data.get('agent_name')}] 发送信号失败: {e}")
