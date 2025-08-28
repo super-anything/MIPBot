@@ -52,6 +52,17 @@ OVER_MATERIALS = [
             "🔥 Chahiye same result? Try karna shuru karo abhi 👉🚀"
         ),
     },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over4.jpg",
+        "caption": (
+            "🎮 Mines fund allocation strategy — bot ke signals follow karo.\n"
+            "💱 Ek game mein kitna lagana? Suggested single bet = 5–20% of fund.\n"
+            "Example: 1000 rupees ho toh per game 50–200 rupees. Safe & continuous play.\n"
+            "Consecutive jeet pe thoda increase kar sakte ho — 20% → 30% ✅\n"
+            "🎯 Daily profit target: +30% to +50%. Example: 10,000 fund se aaj 3,000–5,000 profit ho gaya toh stop 🛑, kal continue.\n"
+            "📈 Fund accumulation thinking: aaj 3,000 win → kal principal 13,000, phir uske hisaab se next bet. 🚀"
+        ),
+    },
 ]
 
 
