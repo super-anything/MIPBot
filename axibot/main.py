@@ -152,6 +152,41 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.warning(f"[{context.bot_data.get('agent_name')}] 计划再次触发发送失败: {e}")
 
+    # --- 累计轮次：每完成 3 轮后发送一次带单素材（共 9 轮覆盖三条） ---
+    try:
+        rounds = context.bot_data.get('rounds_completed', 0) + 1
+        context.bot_data['rounds_completed'] = rounds
+
+        if rounds % 3 == 0:
+            materials = getattr(config, 'OVER_MATERIALS', []) or []
+            if materials:
+                idx = context.bot_data.get('over_material_index', 0)
+                mat = materials[idx % len(materials)]
+
+                image_url = mat.get('image_url')
+                caption = mat.get('caption')
+
+                image_file_ids = context.bot_data.get('image_file_ids', {})
+                if image_url in image_file_ids:
+                    fid = image_file_ids[image_url]
+                    try:
+                        await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=fid, caption=caption)
+                    except Exception as e:
+                        logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单缓存图片失败: {e}")
+                else:
+                    try:
+                        msg = await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=image_url, caption=caption)
+                        if getattr(msg, 'photo', None):
+                            image_file_ids[image_url] = msg.photo[-1].file_id
+                            context.bot_data['image_file_ids'] = image_file_ids
+                    except Exception as e:
+                        logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单图片失败: {e}")
+
+                # 三组素材按顺序轮换
+                context.bot_data['over_material_index'] = (idx + 1) % len(materials)
+    except Exception as e:
+        logger.warning(f"[{context.bot_data.get('agent_name')}] 带单素材发送流程出错: {e}")
+
 
 async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
     # 支持强制发送：当权限刚恢复时即刻首发
@@ -190,6 +225,14 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"[{agent_name}] 信号任务触发第 {call_count} 次 -> {target_chat}")
 
         # 去掉 sendnow 门槛，任何时候都可由调度或手动触发
+
+        # 每次发送前置提示（英式印地语/Hinglish），再等待 1s
+        try:
+            pretext = "📶 Signal detect ho gaya 🚥"
+            await context.bot.send_message(chat_id=target_chat, text=pretext)
+            await asyncio.sleep(1)
+        except Exception:
+            pass
 
         if call_count % 3 == 1:
             try:
@@ -232,9 +275,9 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         job_queue = context.job_queue
         # 恢复完整倒计时提醒
         job_queue.run_once(_send_5_min_warning, 3)
-        job_queue.run_once(_send_3_min_warning, 120)
-        job_queue.run_once(_send_1_min_warning, 240)
-        job_queue.run_once(_send_success_and_unlock, 300)
+        job_queue.run_once(_send_3_min_warning, 120)  #生产为120
+        job_queue.run_once(_send_1_min_warning, 240) #生产为240
+        job_queue.run_once(_send_success_and_unlock, 300) #生产为300
 
     except Exception as e:
         logger.error(f"[{context.bot_data.get('agent_name')}] 发送信号失败: {e}")
@@ -277,6 +320,9 @@ async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config:
     app.bot_data['last_signal_time'] = 0  # 记录上次发送信号的时间
     app.bot_data['image_file_ids'] = {}  # 缓存已上传的图片文件ID
     app.bot_data['is_signal_active'] = False  # 启动时确保无锁
+    # 轮播素材相关：记录已完成的轮次数与下次素材索引
+    app.bot_data['rounds_completed'] = 0
+    app.bot_data['over_material_index'] = 0
     logger.info(f"[{app.bot_data['agent_name']}] [START] app created -> target={target_chat_id}")
 
     # 安排重复性任务
