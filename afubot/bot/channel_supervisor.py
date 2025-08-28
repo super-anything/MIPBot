@@ -106,4 +106,17 @@ class ChannelSupervisor:
             logger.error("ChannelSupervisor: send_now failed: %s", e)
             return False
 
+    async def update_config(self, token: str, **fields) -> bool:
+        """热更新运行中机器人的配置（例如 play_url）。"""
+        app = self.running.get(token)
+        if not app:
+            return False
+        try:
+            bot_conf = app.bot_data.get('bot_config') or {}
+            bot_conf.update({k: v for k, v in fields.items() if v is not None})
+            app.bot_data['bot_config'] = bot_conf
+            return True
+        except Exception:
+            return False
+
 

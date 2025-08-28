@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 # 优化流程：先选择机器人类型，再根据类型收集相应信息
 GETTING_AGENT_NAME, GETTING_BOT_TOKEN, GETTING_BOT_TYPE, GETTING_REG_LINK, GETTING_CHANNEL_LINK, GETTING_PLAY_URL, GETTING_VIDEO_URL, GETTING_IMAGE_URL = range(
     10, 18)
+# 编辑频道游戏链接流程
+EDIT_SELECT_BOT, EDIT_INPUT_PLAY_URL = 18, 19
 
 # 机器人类型常量
 BOT_TYPE_GUIDE = 'private'  # 私聊引导注册类型
@@ -45,7 +47,7 @@ async def start_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 **/delbot** - 删除一个代理机器人\n"
         "🔹 **/help** - 显示此帮助信息\n"
         "🔹 **/catuser** - 查看自己创建的引导机器人引流人数（数据隔离）\n"
-        "🔹 **/claimbot** - 认领历史创建者为空的机器人（无参列出，或 /claimbot <code>BOT_TOKEN</code> 直认）\n"
+        "🔹 **/editplay** - 修改频道带单机器人的游戏链接（play_url）\n"
         "🔹 **/cancel** - 取消当前操作"
     )
     await update.message.reply_text(help_text, parse_mode='HTML')
@@ -152,6 +154,70 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for idx, content in enumerate(pages, start=1):
         suffix = f"\n第 {idx}/{len(pages)} 页" if len(pages) > 1 else ""
         await update.message.reply_text(content + suffix, parse_mode='HTML')
+
+
+# --- 修改频道机器人 play_url ---
+async def edit_play_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return ConversationHandler.END
+    operator_id = update.effective_user.id
+    bots = database.get_bots_by_creator(operator_id, role=BOT_TYPE_CHANNEL)
+    if not bots:
+        await update.message.reply_text("你还没有创建任何频道带单机器人。")
+        return ConversationHandler.END
+    keyboard = []
+    for bot in bots:
+        name = html.escape(bot['agent_name'])
+        token = bot['bot_token']
+        keyboard.append([InlineKeyboardButton(f"选择：{name}", callback_data=f"editplay_select_{token}")])
+    await update.message.reply_text("请选择要修改游戏链接的频道机器人：", reply_markup=InlineKeyboardMarkup(keyboard))
+    return EDIT_SELECT_BOT
+
+
+async def edit_play_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    token = query.data.split("_", 2)[-1]
+    bot = database.get_bot_by_token(token)
+    if not bot or (bot.get('created_by') not in (None, update.effective_user.id)):
+        await query.edit_message_text("错误：无权限或机器人不存在。")
+        return ConversationHandler.END
+    context.user_data['edit_token'] = token
+    cur_url = bot.get('play_url') or '(未配置)'
+    await query.edit_message_text(f"当前机器人：{html.escape(bot['agent_name'])}\n现有 play_url：{html.escape(cur_url)}\n\n请发送新的 play_url：")
+    return EDIT_INPUT_PLAY_URL
+
+
+async def edit_play_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return ConversationHandler.END
+    token = context.user_data.get('edit_token')
+    if not token:
+        await update.message.reply_text("状态已丢失，请重新执行 /editplay。")
+        return ConversationHandler.END
+    new_url = (update.message.text or '').strip()
+    if not new_url:
+        await update.message.reply_text("请输入有效的链接。")
+        return EDIT_INPUT_PLAY_URL
+    ok = database.update_play_url(token, new_url)
+    # 热更新运行中的频道机器人配置
+    try:
+        supervisor = context.application.bot_data.get('channel_supervisor')
+    except Exception:
+        supervisor = None
+    if supervisor is not None:
+        try:
+            await supervisor.update_config(token, play_url=new_url)
+        except Exception:
+            pass
+    if ok:
+        await update.message.reply_text("✅ 已更新 play_url。后续发送将使用新链接。")
+    else:
+        await update.message.reply_text("❌ 更新失败，未找到对应机器人。")
+    context.user_data.pop('edit_token', None)
+    return ConversationHandler.END
 
 
 # --- 强制触发一次发送 ---
@@ -447,6 +513,16 @@ add_bot_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, get_image_url_and_save),
             CallbackQueryHandler(get_image_url_and_save, pattern="^skip_image$")
         ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel_add_bot)],
+)
+
+
+edit_play_handler = ConversationHandler(
+    entry_points=[CommandHandler("editplay", edit_play_start)],
+    states={
+        EDIT_SELECT_BOT: [CallbackQueryHandler(edit_play_select, pattern="^editplay_select_")],
+        EDIT_INPUT_PLAY_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_play_input)],
     },
     fallbacks=[CommandHandler("cancel", cancel_add_bot)],
 )

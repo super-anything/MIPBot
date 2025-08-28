@@ -367,6 +367,24 @@ def update_bot_file_ids(
     finally:
         conn.close()
 
+
+def update_play_url(token: str, play_url: str) -> bool:
+    """更新指定机器人的 play_url。返回是否成功。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE bots SET play_url = %s WHERE bot_token = %s", (play_url, token))
+                conn.commit()
+                return cursor.rowcount > 0
+        else:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE bots SET play_url = ? WHERE bot_token = ?", (play_url, token))
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
 def toggle_bot_status(token: str):
     conn = get_db_connection()
     try:

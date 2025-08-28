@@ -22,7 +22,8 @@ from .admin_handlers import (
     delete_bot_start,
     delete_bot_confirm,
     delete_bot_execute,
-    delete_bot_cancel
+    delete_bot_cancel,
+    edit_play_handler
 )
 from .channel_supervisor import ChannelSupervisor
 from .handlers import conversation_handler, nag_recharge_callback, NAG_INTERVAL_SECONDS
@@ -152,6 +153,7 @@ async def startup():
         BotCommand("listbots", "📋 查看列表"),
         BotCommand("sendnow", "🚀 频道立即发送"),
         BotCommand("delbot", "🗑️ 删除代理"),
+        BotCommand("editplay", "✏️ 修改频道游戏链接"),
         BotCommand("help", "❓ 获取帮助"),
         BotCommand("cancel", "❌ 取消当前操作"),
     ]
@@ -166,10 +168,12 @@ async def startup():
     # 注册所有管理员处理器
     admin_app.add_handler(CommandHandler(["start", "help"], start_admin))
     admin_app.add_handler(add_bot_handler)
+    admin_app.add_handler(edit_play_handler)
     admin_app.add_handler(CommandHandler("listbots", list_bots))
     admin_app.add_handler(CommandHandler("catuser", __import__('afubot.bot.admin_handlers', fromlist=['catuser']).catuser))
-    admin_app.add_handler(CommandHandler("claimbot", __import__('afubot.bot.admin_handlers', fromlist=['claimbot']).claimbot))
-    admin_app.add_handler(CallbackQueryHandler(__import__('afubot.bot.admin_handlers', fromlist=['claimbot_cb']).claimbot_cb, pattern="^claimbot_ref_"))
+    # 下线：认领历史机器人功能
+    # admin_app.add_handler(CommandHandler("claimbot", __import__('afubot.bot.admin_handlers', fromlist=['claimbot']).claimbot))
+    # admin_app.add_handler(CallbackQueryHandler(__import__('afubot.bot.admin_handlers', fromlist=['claimbot_cb']).claimbot_cb, pattern="^claimbot_ref_"))
     admin_app.add_handler(CommandHandler("sendnow", send_now_start))
     admin_app.add_handler(CommandHandler("delbot", delete_bot_start))
     admin_app.add_handler(CallbackQueryHandler(send_now_execute, pattern="^sendnow_"))
