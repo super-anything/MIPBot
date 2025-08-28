@@ -57,7 +57,8 @@ def initialize_db():
                 image_file_id TEXT,
                 deposit_file_id TEXT,
                 sticker_file_id TEXT,
-                first_image_file_id TEXT
+                first_image_file_id TEXT,
+                created_by BIGINT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """
         )
@@ -106,6 +107,7 @@ def initialize_db():
         for col, ddl in [
             ("sticker_file_id", "ALTER TABLE bots ADD COLUMN sticker_file_id TEXT"),
             ("first_image_file_id", "ALTER TABLE bots ADD COLUMN first_image_file_id TEXT"),
+            ("created_by", "ALTER TABLE bots ADD COLUMN created_by BIGINT NULL"),
         ]:
             try:
                 cursor.execute(
@@ -137,14 +139,15 @@ def initialize_db():
                 image_file_id TEXT,
                 deposit_file_id TEXT,
                 sticker_file_id TEXT,
-                first_image_file_id TEXT
+                first_image_file_id TEXT,
+                created_by INTEGER
             );
             """
         )
         # 兼容旧表：为缺失的列做补充
         cursor.execute("PRAGMA table_info('bots');")
         existing_cols = {row[1] for row in cursor.fetchall()}
-        for col in ("video_file_id", "image_file_id", "deposit_file_id", "play_url", "bot_role", "sticker_file_id", "first_image_file_id"):
+        for col in ("video_file_id", "image_file_id", "deposit_file_id", "play_url", "bot_role", "sticker_file_id", "first_image_file_id", "created_by"):
             if col not in existing_cols:
                 cursor.execute(f"ALTER TABLE bots ADD COLUMN {col} TEXT")
         # 会话持久化表
@@ -288,17 +291,17 @@ def get_all_bots():
         conn.close()
 
 
-def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, play_url: str | None = None, video_url: str = None, image_url: str = None, bot_role: str = 'private'):
+def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, play_url: str | None = None, video_url: str = None, image_url: str = None, bot_role: str = 'private', created_by: int | None = None):
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
             try:
                 with conn.cursor() as cursor:
                     sql = (
-                        "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, bot_role) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                        "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, bot_role, created_by) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
                     )
-                    cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role))
+                    cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role, created_by))
                     conn.commit()
                     bot_id = cursor.lastrowid
                     return get_bot_by_id(bot_id)
@@ -307,10 +310,10 @@ def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None
         else:
             cursor = conn.cursor()
             sql = (
-                "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, bot_role) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO bots (agent_name, bot_token, registration_link, channel_link, play_url, video_url, image_url, bot_role, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
-            cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role))
+            cursor.execute(sql, (agent_name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role, created_by))
             conn.commit()
             bot_id = cursor.lastrowid
             return get_bot_by_id(bot_id)
@@ -501,5 +504,131 @@ def delete_bot_by_id(bot_id: int) -> bool:
         print(f"按ID删除机器人时出错: {e}")
         conn.rollback()
         return False
+    finally:
+        conn.close()
+
+
+def get_bots_by_creator(created_by: int, role: str | None = None):
+    """按创建者（运营）查询机器人，可选按角色筛选。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                if role:
+                    cursor.execute("SELECT * FROM bots WHERE created_by = %s AND bot_role = %s", (created_by, role))
+                else:
+                    cursor.execute("SELECT * FROM bots WHERE created_by = %s", (created_by,))
+                return cursor.fetchall()
+        else:
+            cursor = conn.cursor()
+            if role:
+                cursor.execute("SELECT * FROM bots WHERE created_by = ? AND bot_role = ?", (created_by, role))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+            else:
+                cursor.execute("SELECT * FROM bots WHERE created_by = ?", (created_by,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def count_users_for_bot(bot_token: str) -> int:
+    """统计在 user_conversations 中出现过的唯一 chat_id 数量，视为“点进来过”。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT COUNT(DISTINCT chat_id) FROM user_conversations WHERE bot_token = %s", (bot_token,))
+                row = cursor.fetchone()
+                return int(row[0] if isinstance(row, (list, tuple)) else list(row.values())[0])
+        else:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(DISTINCT chat_id) FROM user_conversations WHERE bot_token = ?", (bot_token,))
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def get_unclaimed_bots(role: str | None = None):
+    """查询 created_by 为空/NULL 的历史机器人。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                if role:
+                    cursor.execute("SELECT * FROM bots WHERE created_by IS NULL AND bot_role = %s", (role,))
+                else:
+                    cursor.execute("SELECT * FROM bots WHERE created_by IS NULL")
+                return cursor.fetchall()
+        else:
+            cursor = conn.cursor()
+            if role:
+                cursor.execute("SELECT * FROM bots WHERE created_by IS NULL AND bot_role = ?", (role,))
+            else:
+                cursor.execute("SELECT * FROM bots WHERE created_by IS NULL")
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def claim_bot_owner(bot_token: str, operator_id: int) -> bool:
+    """为一个 created_by 为空的机器人设置归属。返回是否成功。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE bots SET created_by = %s WHERE bot_token = %s AND (created_by IS NULL)", (operator_id, bot_token))
+                conn.commit()
+                return cursor.rowcount > 0
+        else:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE bots SET created_by = ? WHERE bot_token = ? AND (created_by IS NULL)", (operator_id, bot_token))
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def claim_all_unowned(operator_id: int, role: str | None = None) -> int:
+    """批量为未认领机器人设置归属，返回受影响数量。可按角色过滤。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                if role:
+                    cursor.execute("UPDATE bots SET created_by = %s WHERE created_by IS NULL AND bot_role = %s", (operator_id, role))
+                else:
+                    cursor.execute("UPDATE bots SET created_by = %s WHERE created_by IS NULL", (operator_id,))
+                conn.commit()
+                return cursor.rowcount
+        else:
+            cursor = conn.cursor()
+            if role:
+                cursor.execute("UPDATE bots SET created_by = ? WHERE created_by IS NULL AND bot_role = ?", (operator_id, role))
+            else:
+                cursor.execute("UPDATE bots SET created_by = ? WHERE created_by IS NULL", (operator_id,))
+            conn.commit()
+            return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def claim_bot_owner_by_id(bot_id: int, operator_id: int) -> bool:
+    """按 id 认领（created_by 为空时生效）。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE bots SET created_by = %s WHERE id = %s AND (created_by IS NULL)", (operator_id, bot_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        else:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE bots SET created_by = ? WHERE id = ? AND (created_by IS NULL)", (operator_id, bot_id))
+            conn.commit()
+            return cursor.rowcount > 0
     finally:
         conn.close()

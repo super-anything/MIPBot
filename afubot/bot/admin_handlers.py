@@ -44,14 +44,65 @@ async def start_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 **/listbots** - 查看所有代理机器人列表\n"
         "🔹 **/delbot** - 删除一个代理机器人\n"
         "🔹 **/help** - 显示此帮助信息\n"
+        "🔹 **/catuser** - 查看自己创建的引导机器人引流人数（数据隔离）\n"
+        "🔹 **/claimbot** - 认领历史创建者为空的机器人（无参列出，或 /claimbot <code>BOT_TOKEN</code> 直认）\n"
         "🔹 **/cancel** - 取消当前操作"
     )
     await update.message.reply_text(help_text, parse_mode='HTML')
+# --- 认领历史数据：/claimbot 与 /claimall ---
+async def claimbot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+    parts = (update.message.text or '').split(maxsplit=1)
+    # 带 token：直接认领
+    if len(parts) >= 2:
+        token = parts[1].strip()
+        ok = database.claim_bot_owner(token, update.effective_user.id)
+        if ok:
+            await update.message.reply_text("✅ 认领成功。")
+        else:
+            await update.message.reply_text("❌ 认领失败：可能该机器人已被认领或不存在。")
+        return
+    # 无参：列出所有未归属机器人，提供按钮一键认领
+    unowned = database.get_unclaimed_bots()
+    if not unowned:
+        await update.message.reply_text("当前没有未归属的历史机器人。")
+        return
+    keyboard = []
+    for bot in unowned[:50]:
+        name = html.escape(bot['agent_name'])
+        ref = str(bot.get('id') or bot.get('bot_token'))
+        keyboard.append([InlineKeyboardButton(f"认领：{name}", callback_data=f"claimbot_ref_{ref}")])
+    await update.message.reply_text("请选择要认领的机器人：", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def claimbot_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+    query = update.callback_query
+    await query.answer()
+    ref = query.data.split('_', 2)[-1]
+    ok = False
+    # 优先尝试按 id 认领；若失败则按 token 认领
+    try:
+        bot_id = int(ref)
+        ok = database.claim_bot_owner_by_id(bot_id, update.effective_user.id)
+    except ValueError:
+        ok = database.claim_bot_owner(ref, update.effective_user.id)
+    if ok:
+        await query.edit_message_text("✅ 认领成功。")
+    else:
+        await query.edit_message_text("❌ 认领失败：可能该机器人已被认领或不存在。")
+
+
+# 删除 claimall 功能
 
 
 async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update): return
-    all_bots = database.get_all_bots()
+    # 仅显示本人创建的机器人
+    operator_id = update.effective_user.id
+    all_bots = database.get_bots_by_creator(operator_id)
     if not all_bots:
         await update.message.reply_text("数据库中还没有任何机器人。")
         return
@@ -237,7 +288,8 @@ async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         bot_role = context.user_data.get('bot_role') or 'private'
 
         await update.message.reply_text("正在保存所有配置并尝试启动机器人...")
-        new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role)
+        created_by = update.effective_user.id
+        new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role, created_by)
 
         if not new_bot_config:
             await update.message.reply_text("❌ 保存失败！这个Bot Token可能已经存在于数据库中。")
@@ -341,7 +393,8 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
     bot_role = context.user_data.get('bot_role') or 'private'
 
     await context.bot.send_message(chat_id=chat_id, text="正在保存所有配置并尝试启动机器人...")
-    new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role)
+    created_by = update.effective_user.id
+    new_bot_config = database.add_bot(name, token, reg_link, channel_link, play_url, video_url, image_url, bot_role, created_by)
 
     if not new_bot_config:
         await context.bot.send_message(chat_id=chat_id, text="❌ 保存失败！这个Bot Token可能已经存在于数据库中。")
@@ -397,12 +450,59 @@ add_bot_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", cancel_add_bot)],
 )
+# --- /catuser: 仅查看自己创建的私聊引导机器人引流人数 ---
+async def catuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+    operator_id = update.effective_user.id
+    # 仅查询该用户创建的 private 机器人
+    bots = database.get_bots_by_creator(operator_id, role=BOT_TYPE_GUIDE)
+    if not bots:
+        await update.message.reply_text("你还没有创建任何引导注册机器人。")
+        return
+
+    # 按页输出，控制长度
+    header = "<b>你的引导注册机器人 - 引流人数（去重）:</b>\n\n"
+    max_chars = 3500
+    current = [header]
+    curlen = len(header)
+    pages = []
+
+    for bot in bots:
+        count = 0
+        try:
+            count = database.count_users_for_bot(bot['bot_token'])
+        except Exception:
+            count = 0
+        line = (
+            f"<b>代理:</b> {html.escape(bot['agent_name'])}\n"
+            f"<b>Token:</b> <code>{html.escape(bot['bot_token'][:10])}...</code>\n"
+            f"<b>引流人数:</b> {count}\n"
+            f"--------------------\n"
+        )
+        if curlen + len(line) > max_chars:
+            pages.append("".join(current))
+            current = [header, line]
+            curlen = len(header) + len(line)
+        else:
+            current.append(line)
+            curlen += len(line)
+
+    if current:
+        pages.append("".join(current))
+
+    for idx, content in enumerate(pages, start=1):
+        suffix = f"\n第 {idx}/{len(pages)} 页" if len(pages) > 1 else ""
+        await update.message.reply_text(content + suffix, parse_mode='HTML')
+
 
 
 # --- 删除机器人流程 (保持不变) ---
 async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update): return
-    all_bots = database.get_all_bots()
+    # 仅展示本人创建的机器人
+    operator_id = update.effective_user.id
+    all_bots = database.get_bots_by_creator(operator_id)
     if not all_bots:
         await update.message.reply_text("数据库中还没有任何机器人可以删除。")
         return
@@ -433,7 +533,8 @@ async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
         bot_config = database.get_bot_by_id(bot_id)
     except ValueError:
         bot_config = database.get_bot_by_token(bot_ref)
-    if not bot_config:
+    # 越权校验：仅允许操作本人创建的机器人
+    if not bot_config or (bot_config.get('created_by') not in (None, update.effective_user.id)):
         await query.edit_message_text("错误：找不到该机器人，可能已被删除。")
         return
     # 回调继续携带 id；若当前只有 token 则携带 token
@@ -462,7 +563,11 @@ async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE)
         bot_config = database.get_bot_by_id(bot_id)
     except ValueError:
         bot_config = database.get_bot_by_token(bot_ref)
-    agent_name = html.escape(bot_config['agent_name']) if bot_config else "未知"
+    # 越权校验：仅允许操作本人创建的机器人
+    if not bot_config or (bot_config.get('created_by') not in (None, update.effective_user.id)):
+        await query.edit_message_text("错误：无权限操作该机器人。")
+        return
+    agent_name = html.escape(bot_config['agent_name'])
     await query.edit_message_text(f"正在停止机器人 '{agent_name}'...")
     manager = context.application.bot_data['manager']
     if bot_config and bot_config.get('bot_token'):
