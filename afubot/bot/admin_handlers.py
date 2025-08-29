@@ -20,6 +20,8 @@ GETTING_AGENT_NAME, GETTING_BOT_TOKEN, GETTING_BOT_TYPE, GETTING_REG_LINK, GETTI
     10, 18)
 # 编辑频道游戏链接流程
 EDIT_SELECT_BOT, EDIT_INPUT_PLAY_URL = 18, 19
+# 编辑私聊注册机器人注册链接流程
+EDIT_REG_SELECT_BOT, EDIT_REG_INPUT_LINK = 20, 21
 
 # 机器人类型常量
 BOT_TYPE_GUIDE = 'private'  # 私聊引导注册类型
@@ -41,13 +43,14 @@ async def start_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         f"👋 你好, {user_name}！\n\n"
         "欢迎使用代理机器人管理后台。\n\n"
-        "你可以通过下方的【菜单】按钮或直接输入指令来操作：\n\n"
+        "你可以通过下方的【菜单】按钮或直接输入指令来操作：\n"
         "🔹 **/addbot** - 添加一个新的代理机器人\n"
         "🔹 **/listbots** - 查看所有代理机器人列表\n"
         "🔹 **/delbot** - 删除一个代理机器人\n"
         "🔹 **/help** - 显示此帮助信息\n"
         "🔹 **/catuser** - 查看自己创建的引导机器人引流人数（数据隔离）\n"
         "🔹 **/editplay** - 修改频道带单机器人的游戏链接（play_url）\n"
+        "🔹 **/editreg** - 修改引导注册机器人的注册链接\n"
         "🔹 **/cancel** - 取消当前操作"
     )
     await update.message.reply_text(help_text, parse_mode='HTML')
@@ -217,6 +220,70 @@ async def edit_play_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ 更新失败，未找到对应机器人。")
     context.user_data.pop('edit_token', None)
+    return ConversationHandler.END
+
+
+# --- 修改引导注册机器人的 registration_link ---
+async def edit_reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return ConversationHandler.END
+    operator_id = update.effective_user.id
+    bots = database.get_bots_by_creator(operator_id, role=BOT_TYPE_GUIDE)
+    if not bots:
+        await update.message.reply_text("你还没有创建任何引导注册机器人。")
+        return ConversationHandler.END
+    keyboard = []
+    for bot in bots:
+        name = html.escape(bot['agent_name'])
+        token = bot['bot_token']
+        keyboard.append([InlineKeyboardButton(f"选择：{name}", callback_data=f"editreg_select_{token}")])
+    await update.message.reply_text("请选择要修改注册链接的引导注册机器人：", reply_markup=InlineKeyboardMarkup(keyboard))
+    return EDIT_REG_SELECT_BOT
+
+
+async def edit_reg_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    token = query.data.split("_", 2)[-1]
+    bot = database.get_bot_by_token(token)
+    if not bot or (bot.get('created_by') not in (None, update.effective_user.id)):
+        await query.edit_message_text("错误：无权限或机器人不存在。")
+        return ConversationHandler.END
+    context.user_data['edit_reg_token'] = token
+    cur = bot.get('registration_link') or '(未配置)'
+    await query.edit_message_text(f"当前机器人：{html.escape(bot['agent_name'])}\n现有注册链接：{html.escape(cur)}\n\n请发送新的注册链接：")
+    return EDIT_REG_INPUT_LINK
+
+
+async def edit_reg_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return ConversationHandler.END
+    token = context.user_data.get('edit_reg_token')
+    if not token:
+        await update.message.reply_text("状态已丢失，请重新执行 /editreg。")
+        return ConversationHandler.END
+    new_link = (update.message.text or '').strip()
+    if not new_link:
+        await update.message.reply_text("请输入有效的链接。")
+        return EDIT_REG_INPUT_LINK
+    ok = database.update_registration_link(token, new_link)
+    # 若该机器人正在运行（私聊引导），热更新其配置
+    try:
+        manager = context.application.bot_data.get('manager')
+        if manager and token in getattr(manager, 'running_bots', {}):
+            app = manager.running_bots[token]
+            conf = app.bot_data.get('config', {}) or {}
+            conf['registration_link'] = new_link
+            app.bot_data['config'] = conf
+    except Exception:
+        pass
+    if ok:
+        await update.message.reply_text("✅ 已更新注册链接。新用户对话将使用新链接。")
+    else:
+        await update.message.reply_text("❌ 更新失败，未找到对应机器人。")
+    context.user_data.pop('edit_reg_token', None)
     return ConversationHandler.END
 
 
@@ -523,6 +590,16 @@ edit_play_handler = ConversationHandler(
     states={
         EDIT_SELECT_BOT: [CallbackQueryHandler(edit_play_select, pattern="^editplay_select_")],
         EDIT_INPUT_PLAY_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_play_input)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel_add_bot)],
+)
+
+
+edit_reg_handler = ConversationHandler(
+    entry_points=[CommandHandler("editreg", edit_reg_start)],
+    states={
+        EDIT_REG_SELECT_BOT: [CallbackQueryHandler(edit_reg_select, pattern="^editreg_select_")],
+        EDIT_REG_INPUT_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_reg_input)],
     },
     fallbacks=[CommandHandler("cancel", cancel_add_bot)],
 )

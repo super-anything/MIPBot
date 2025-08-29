@@ -23,7 +23,8 @@ from .admin_handlers import (
     delete_bot_confirm,
     delete_bot_execute,
     delete_bot_cancel,
-    edit_play_handler
+    edit_play_handler,
+    edit_reg_handler
 )
 from .channel_supervisor import ChannelSupervisor
 from .handlers import conversation_handler, nag_recharge_callback, NAG_INTERVAL_SECONDS
@@ -154,6 +155,7 @@ async def startup():
         BotCommand("sendnow", "🚀 频道立即发送"),
         BotCommand("delbot", "🗑️ 删除代理"),
         BotCommand("editplay", "✏️ 修改频道游戏链接"),
+        BotCommand("editreg", "✏️ 修改引导注册链接"),
         BotCommand("help", "❓ 获取帮助"),
         BotCommand("cancel", "❌ 取消当前操作"),
     ]
@@ -169,6 +171,7 @@ async def startup():
     admin_app.add_handler(CommandHandler(["start", "help"], start_admin))
     admin_app.add_handler(add_bot_handler)
     admin_app.add_handler(edit_play_handler)
+    admin_app.add_handler(edit_reg_handler)
     admin_app.add_handler(CommandHandler("listbots", list_bots))
     admin_app.add_handler(CommandHandler("catuser", __import__('afubot.bot.admin_handlers', fromlist=['catuser']).catuser))
     # 下线：认领历史机器人功能
