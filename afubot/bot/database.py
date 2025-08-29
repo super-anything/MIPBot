@@ -1,3 +1,13 @@
+"""数据库访问层（Data Access Layer）
+
+提供对机器人配置与用户会话数据的持久化支持，兼容 MySQL 与 SQLite：
+- 连接管理：`get_db_connection()`
+- 表结构初始化与向后兼容处理：`initialize_db()`
+- 业务实体：机器人（bots）、用户会话（user_conversations）的 CRUD 与统计查询
+
+注意：本模块为同步数据库调用，建议在上层异步代码中避免长时间阻塞，或在必要时放入线程池执行。
+"""
+
 from .config import (
     DB_BACKEND,
     DB_FILE,
@@ -16,7 +26,11 @@ else:
 
 
 def get_db_connection():
-    """建立并返回数据库连接，支持 sqlite 与 mysql"""
+    """建立并返回数据库连接。
+
+    - 当配置为 MySQL 时，返回 `pymysql.connect` 的连接对象（DictCursor，utf8mb4）。
+    - 当配置为 SQLite 时，返回 `sqlite3.connect` 的连接对象（行工厂 `sqlite3.Row`）。
+    """
     if DB_BACKEND == "mysql":
         return pymysql.connect(
             host=MYSQL_HOST,
@@ -35,7 +49,11 @@ def get_db_connection():
 
 
 def initialize_db():
-    """初始化数据库，创建表结构（支持 MySQL / SQLite）"""
+    """初始化数据库，创建或修补所需表结构（支持 MySQL / SQLite）。
+
+    - 创建 `bots` 表（机器人配置）与 `user_conversations` 表（用户会话持久化）。
+    - 对历史库进行列补全（向后兼容），容错处理不影响主流程。
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -171,6 +189,14 @@ def initialize_db():
 
 # --- 用户会话持久化：CRUD ---
 def get_user_conversation(bot_token: str, chat_id: int):
+    """读取某机器人在某聊天下的会话状态与负载。
+
+    参数:
+        bot_token: 机器人 token
+        chat_id: 用户/会话 chat_id
+    返回:
+        dict | None: {"state": str, "payload_json": str | None}，不存在则返回 None
+    """
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -190,6 +216,10 @@ def get_user_conversation(bot_token: str, chat_id: int):
 
 
 def upsert_user_conversation(bot_token: str, chat_id: int, state: str, payload_json: str | None = None):
+    """插入或更新用户会话记录（幂等 UPSERT）。
+
+    若记录不存在则插入；存在则更新 `state` 与 `payload_json`。
+    """
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -213,6 +243,7 @@ def upsert_user_conversation(bot_token: str, chat_id: int, state: str, payload_j
 
 
 def delete_user_conversation(bot_token: str, chat_id: int):
+    """删除指定机器人在指定 chat 的会话记录。"""
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -251,6 +282,13 @@ def list_user_conversations(bot_token: str):
 
 
 def get_active_bots(role: str | None = None):
+    """查询启用状态为激活的机器人列表。
+
+    参数:
+        role: 角色过滤（如 'private' 或 'channel'），None 表示不过滤
+    返回:
+        list: 机器人配置字典列表
+    """
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -276,6 +314,7 @@ def get_active_bots(role: str | None = None):
 
 
 def get_all_bots():
+    """返回数据库中所有机器人（无论激活状态）。"""
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -292,6 +331,10 @@ def get_all_bots():
 
 
 def add_bot(agent_name: str, token: str, reg_link: str, channel_link: str = None, play_url: str | None = None, video_url: str = None, image_url: str = None, bot_role: str = 'private', created_by: int | None = None):
+    """新增一个机器人配置并返回其完整记录。
+
+    失败（例如 token 唯一约束冲突）时返回 None。
+    """
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -404,6 +447,11 @@ def update_registration_link(token: str, registration_link: str) -> bool:
         conn.close()
 
 def toggle_bot_status(token: str):
+    """切换机器人启用状态（is_active 在 0/1 间翻转）。
+
+    返回:
+        bool | None: 切换后的状态（True/False）；未找到则返回 None
+    """
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -432,6 +480,7 @@ def toggle_bot_status(token: str):
 
 
 def get_bot_by_token(token: str):
+    """按 bot_token 查询机器人配置。不存在返回 None。"""
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":
@@ -449,6 +498,7 @@ def get_bot_by_token(token: str):
 
 
 def get_bot_by_id(bot_id: int):
+    """按自增主键 id 查询机器人配置。不存在返回 None。"""
     conn = get_db_connection()
     try:
         if DB_BACKEND == "mysql":

@@ -1,3 +1,19 @@
+"""私聊引导注册机器人 - 对话与发送逻辑
+
+本模块实现：
+- 面向最终用户的对话流程（/start 入口、注册确认、充值确认等）
+- 人性化发送（打字中提示、随机延迟）、发送重试与 file_id 缓存
+- 会话状态持久化（依赖 `database.py`），支持进程重启后的恢复
+
+主要状态：
+- `AWAITING_REGISTER_CONFIRM`: 等待用户确认是否已完成注册
+- `AWAITING_ID`: 等待用户发送 9 位 ID（旧流程保留）
+- `AWAITING_RECHARGE_CONFIRM`: 等待用户点击“已充值”按钮
+
+注意：
+- 所有与 Telegram 交互的操作均添加了有限重试与容错，避免网络抖动导致体验不佳。
+"""
+
 import asyncio
 import logging
 import random
@@ -30,7 +46,12 @@ SEND_RETRY_BACKOFF_SECONDS = 0.8
 
 
 async def _retry_send(send_coro_factory):
-    """对发送动作进行有限次重试，并优先遵循 Telegram 的 Retry-After。"""
+    """对发送动作进行有限次重试。
+
+    - 优先遵循 Telegram 抛出的 `RetryAfter`，按服务端建议等待
+    - 对网络类错误增加指数退避
+    - 其余异常做有限次兜底重试
+    """
     last_exc = None
     for attempt in range(1, SEND_RETRY_ATTEMPTS + 2):  # 初次 + 重试次数
         try:
@@ -53,6 +74,7 @@ async def _retry_send(send_coro_factory):
 
 
 def _get_fileid_cache(context: ContextTypes.DEFAULT_TYPE):
+    """在 `application.bot_data` 上维护一个全局 file_id 缓存字典。"""
     cache = context.application.bot_data.get('file_id_cache')
     if cache is None:
         cache = {}
@@ -61,7 +83,7 @@ def _get_fileid_cache(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_video_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url, caption=None):
-    """优先使用已缓存的 file_id 发送视频，失败则回退到 URL 并缓存。"""
+    """发送视频：优先用缓存 file_id，失败回退到 URL 并回写缓存。"""
     cache = _get_fileid_cache(context)
     cached_file_id = cache.get(url)
 
@@ -89,7 +111,7 @@ async def send_video_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url
 
 
 async def send_photo_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url, caption=None):
-    """优先使用已缓存的 file_id 发送图片，失败则回退到 URL 并缓存。"""
+    """发送图片：优先用缓存 file_id，失败回退到 URL 并回写缓存。"""
     cache = _get_fileid_cache(context)
     cached_file_id = cache.get(url)
 
@@ -118,6 +140,7 @@ async def send_photo_with_cache(context: ContextTypes.DEFAULT_TYPE, chat_id, url
 
 # --- 人性化发送辅助 ---
 def _estimate_typing_seconds_fast(text: str) -> float:
+    """估算较快的“打字中”时间，用于首条或需要迅速反馈的场景。"""
     length = len(text or "")
     base = max(0.0, length / random.uniform(28.0, 36.0))
     jitter = random.uniform(0.05, 0.2)
@@ -125,6 +148,7 @@ def _estimate_typing_seconds_fast(text: str) -> float:
 
 
 def _estimate_typing_seconds_slow(text: str) -> float:
+    """估算较慢的“打字中”时间，用于连续消息的人性化体验。"""
     length = len(text or "")
     base = max(0.0, length / random.uniform(14.0, 20.0))
     jitter = random.uniform(0.3, 0.7)
@@ -132,6 +156,7 @@ def _estimate_typing_seconds_slow(text: str) -> float:
 
 
 async def indicate_action(context: ContextTypes.DEFAULT_TYPE, chat_id, action: ChatAction, seconds: float | None = None):
+    """发送 `正在输入/上传` 等动作提示，并等待指定时间。"""
     try:
         await _retry_send(lambda: context.bot.send_chat_action(chat_id=chat_id, action=action))
         await asyncio.sleep(seconds if seconds is not None else random.uniform(0.5, 1.1))
@@ -141,6 +166,7 @@ async def indicate_action(context: ContextTypes.DEFAULT_TYPE, chat_id, action: C
 
 
 async def human_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id, text: str, parse_mode: str | None = None, fast: bool = False):
+    """模拟人类打字节奏的发送函数，支持快速模式。"""
     # 新增 fast 模式：用于回调场景降低人为延迟，提升响应速度
     if fast:
         seconds = 0.12
@@ -157,7 +183,11 @@ async def human_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id, text: 
 # --- 定时提醒函数 ---
 
 async def nag_recharge_callback(context: ContextTypes.DEFAULT_TYPE):
-    """定时提醒用户确认充值"""
+    """定时提醒用户确认充值。
+
+    - 每次调用增加一次提醒次数，超过阈值后自动停止
+    - 使用 `job_queue.run_once` 重新挂载下一次提醒
+    """
     job = context.job
     chat_id, user_id = job.chat_id, job.user_id
     nag_attempts = context.user_data.get('recharge_nag_attempts', 0)
@@ -180,6 +210,7 @@ async def nag_recharge_callback(context: ContextTypes.DEFAULT_TYPE):
 
 # --- 新增：注册确认/引导 ---
 async def _send_register_prompt(update_or_context, context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """向用户发送“是否已注册”的确认按钮。"""
     keyboard = [[
         InlineKeyboardButton("Yes✅", callback_data="reg_yes"),
         InlineKeyboardButton("No🧩", callback_data="reg_no")
@@ -193,6 +224,7 @@ async def _send_register_prompt(update_or_context, context: ContextTypes.DEFAULT
 
 
 async def _proceed_deposit_and_final(context: ContextTypes.DEFAULT_TYPE, chat_id: int, bot_config: dict):
+    """注册确认后，继续发送充值引导与教学视频，并引导进入频道。"""
     # 第四步：存款与视频（Hinglish 文案）
     lines = [
         "Chalo ab turant Deposit 💳 par click karo, minimum 100 deposit karo. Main tumhe sikhata hoon kaise 100 ko 10000 me badalna hai! 💥 Phir main tumhe prediction robot 🤖 dunga – simple!",
@@ -238,7 +270,7 @@ async def _proceed_deposit_and_final(context: ContextTypes.DEFAULT_TYPE, chat_id
 # --- 对话流程函数与恢复逻辑 ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理 /start 命令，作为对话的入口点（重写为分步脚本）"""
+    """/start 入口：执行首图、文案、注册链接提示，并进入确认阶段。"""
     chat_id = update.effective_chat.id
     bot_config = context.bot_data.get('config', {})
     # 兜底：若未携带或缺少关键链接信息，则从数据库按 token 拉取并回填
@@ -364,6 +396,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def handle_register_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """处理用户对“是否完成注册”的按钮选择。"""
     query = update.callback_query
     # 回调按钮容错：旧/无效 query 直接友好提示并结束
     try:
@@ -438,7 +471,7 @@ async def handle_register_decision(update: Update, context: ContextTypes.DEFAULT
 # 保留旧的ID与充值确认逻辑（当前不再进入）
 
 async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理并验证用户发送的ID"""
+    """处理并验证用户发送的 9 位 ID（旧流程保留）。"""
     user_id_input = update.message.text
     chat_id = update.message.chat_id
     bot_config = context.bot_data.get('config', {})
@@ -481,7 +514,7 @@ async def handle_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """处理用户确认充值"""
+    """处理用户点击“已充值”的确认回调。"""
     query = update.callback_query
     user_id = query.from_user.id
     # 回调按钮容错：旧/无效 query 直接忽略并提示
@@ -521,7 +554,7 @@ async def handle_recharge_confirm(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """取消对话"""
+    """取消当前对话，并尝试清理与该用户相关的提醒任务。"""
     await update.message.reply_text("Conversation canceled. Send /start to restart.")
     # 清理所有可能的任务
     user_id = update.effective_user.id

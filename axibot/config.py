@@ -1,3 +1,9 @@
+"""axibot 资源配置桥接
+
+该模块仅承载图片/媒体库常量，实际的频道/Token 等运行配置
+统一由 afubot 的数据库提供（参见 `afubot.bot.database`）。
+"""
+
 import settings as _S
 
 # --- 图片/媒体库 (URL) ---
@@ -8,13 +14,12 @@ IMAGE_LIBRARY = {
 
 }
 
-# 仅保留媒体库配置；Axibot 现在强制依赖 afubot 数据库中的 channel_link、bot_token 等信息。
+# 仅保留媒体库配置；Axibot 依赖 afubot 数据库中的 channel_link、bot_token 等信息。
 
 
 
 
-# --- 轮次结束追加素材（三组循环） ---
-# 每一轮结束后会按顺序发送一条图片+文案，并在第三组后回到第一组。
+# --- 轮次结束追加素材（9张） ---
 OVER_MATERIALS = [
     {
         "image_url": "https://storage.googleapis.com/axibot/dan/over1.jpg",
@@ -63,6 +68,49 @@ OVER_MATERIALS = [
             "📈 Fund accumulation thinking: aaj 3,000 win → kal principal 13,000, phir uske hisaab se next bet. 🚀"
         ),
     },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over5.jpg",
+        "caption": (
+            "✨ Better than any shabd are numbers aur screenshots 📸\n"
+           " 💸 Sirf kuch minute mein hi kama liya unbelievable paisa 💰\n"
+            "— Yahan log sapne nahi dekhte 😴, directly cash out karte hain 🏦\n"
+            "🔥 Same result chahiye? Abhi game start karo 🎮👉"
+        )
+    },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over6.jpg",
+        "caption": (
+            "🌅 Every morning ek naya chance hai tumhe ek fresh insaan ban’ne ka.\n"
+            "Jab dusre log so rahe hote hain 😴 ya complain karte hain 😒 — tum action le sakte ho aur jo tumhara hai wo le sakte ho 💪.\n"
+            "✨ Start your day the right way.\n"
+            "🔥 Same result chahiye? Abhi click karke game start karo 🎮👉"
+        )
+    },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over7.jpg",
+        "caption": (
+            "Thode hi log jaante hain 🤫: predictor har second mein hundreds of data points analyze karta hai 📊, taaki tumhe peak dikhaye before it flies 🚀.\n"
+            "Ye kismat nahi hai 🍀 — ye AI hai jo tumhare liye kaam kar rahi hai 🤖.\n"
+            "— Dusre log jo nahi dekh paate, woh chance dekhna hai? Abhi saamne wali opportunity ko pakdo 💥."
+        )
+    },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over8.jpg",
+        "caption": (
+            "Sab log kehte hain ki ye impossible hai 😏.\n"
+            "Lekin jab kuch log sirf baatein karte hain 🗣 — dusre log sirf kuch minute mein cash out kar lete hain 💸.\n"
+            "— Tumhe khud decide karna hai ki kis side khade ho 💪.\n"
+            "Ready ho? Paisa kamaana hai ya nahi, choice tumhare haath mein hai 🔥."
+        )
+    },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over9.jpg",
+        "caption": (
+            "🔥🔥 Dekho yaar, mere student ne mera personal mentoring leke kya zabardast result nikala hai 💯!\n"
+            "Bas tumhe new cheezon se darrna band karna hai 😎, thoda risk lena start karo 🚀.\n"
+            "Tum sab bhi kar sakte ho, aur mere saath ho toh bilkul safe ho 👍."
+        )
+    }
 ]
 
 

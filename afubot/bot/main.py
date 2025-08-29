@@ -1,9 +1,18 @@
+"""afubot 主入口
+
+职责：
+- 初始化数据库与后台管理员机器人
+- 启动私聊引导型代理机器人（`BotManager`）
+- 启动并托管频道带单型机器人（`ChannelSupervisor`）
+- 提供优雅的启动/关闭流程
+"""
+
 import asyncio
 import logging
 import platform,random
 from pathlib import Path
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler, PicklePersistence
+from telegram.ext import Application, CommandHandler, ApplicationBuilder, CallbackQueryHandler, PicklePersistence, ContextTypes
 from telegram.request import HTTPXRequest
 
 # 引入频道发送管理器
@@ -43,6 +52,12 @@ class BotManager:
         self.running_bots = {}
 
     async def start_agent_bot(self, bot_config: dict):
+        """按配置启动一个私聊引导机器人，并带持久化恢复。
+
+        - 使用 `PicklePersistence` 进行对话持久化
+        - 将 `conversation_handler` 挂载到子应用
+        - 重启后恢复未完成的会话提醒/阶段
+        """
         token = bot_config['bot_token']
         name = bot_config['agent_name']
 
@@ -58,6 +73,10 @@ class BotManager:
             persist_file = persist_dir / f"conv_{token.split(':')[0]}.bin"
             persistence = PicklePersistence(filepath=str(persist_file))
             agent_app = ApplicationBuilder().token(token).request(request).persistence(persistence).build()
+            # 仅日志的全局错误处理器
+            async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+                logger.exception("Unhandled exception in agent_app", exc_info=context.error)
+            agent_app.add_error_handler(_on_error)
             agent_app.bot_data['config'] = bot_config
             # 确保运行期也能根据 token 从数据库回源
             try:
@@ -119,6 +138,7 @@ class BotManager:
             logger.error(f"代理机器人 '{name}' ({token}) 启动时出现错误: {e}")
 
     async def stop_agent_bot(self, token: str):
+        """停止并清理一个正在运行的私聊引导机器人。"""
         if token in self.running_bots:
             app = self.running_bots[token]
             name = app.bot_data.get('config', {}).get('agent_name', '未知')
@@ -133,6 +153,7 @@ class BotManager:
                 logger.error(f"停止机器人 '{name}' 时发生错误: {e}")
 
     async def start_initial_bots(self):
+        """从数据库批量启动所有活跃的私聊引导机器人。"""
         # 仅启动私聊引导机器人
         initial_bots = database.get_active_bots(role='private')
         logger.info(f"发现 {len(initial_bots)} 个活跃的代理机器人，正在启动...")
@@ -142,6 +163,7 @@ class BotManager:
 
 # --- 4. 核心启动与关闭函数的定义 ---
 async def startup():
+    """系统启动：初始化 DB、管理员应用、并启动各类机器人。"""
     database.initialize_db()
     manager = BotManager()
     # 不再启用 AxiBotManager，统一由 ChannelSupervisor 管理频道机器人，避免重复实例
@@ -164,6 +186,10 @@ async def startup():
         await application.bot.set_my_commands(bot_commands)
 
     admin_app = ApplicationBuilder().token(config.ADMIN_BOT_TOKEN).post_init(post_init).build()
+    # 仅日志的全局错误处理器
+    async def _on_error_admin(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.exception("Unhandled exception in admin_app", exc_info=context.error)
+    admin_app.add_error_handler(_on_error_admin)
     admin_app.bot_data['manager'] = manager
     admin_app.bot_data['channel_supervisor'] = channel_supervisor
 
@@ -206,6 +232,7 @@ async def startup():
 
 
 async def shutdown(manager: BotManager, admin_app: Application):
+    """系统优雅关闭：停止管理员应用与所有子机器人。"""
     logger.info("正在关闭主管理机器人...")
     if admin_app.updater and admin_app.updater._running:
         await admin_app.updater.stop()

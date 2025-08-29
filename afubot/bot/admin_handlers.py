@@ -1,3 +1,16 @@
+"""管理员后台指令与会话流程
+
+提供管理员侧功能：
+- 添加/列出/删除机器人
+- 认领历史机器人（可选）
+- 修改频道机器人 `play_url` 与引导注册机器人的 `registration_link`
+- 触发频道机器人立即发送
+- 统计本人创建的引导机器人引流人数（去重）
+
+依赖：`config` 提供管理员白名单、`database` 提供数据读写，
+并通过 `Application.bot_data` 与运行中的机器人进行热更新。
+"""
+
 import logging
 import html
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -30,11 +43,13 @@ BOT_TYPE_CHANNEL = 'channel'  # 频道带单类型
 
 # --- 权限检查 ---
 def is_admin(update: Update) -> bool:
+    """判断当前用户是否在管理员白名单中。"""
     return update.effective_user.id in config.ADMIN_USER_IDS
 
 
 # --- 管理员指令 ---
 async def start_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/start 与 /help：展示管理员可用指令与说明。"""
     if not is_admin(update):
         await update.message.reply_text("抱歉，您无权使用此机器人。")
         return
@@ -56,6 +71,11 @@ async def start_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode='HTML')
 # --- 认领历史数据：/claimbot 与 /claimall ---
 async def claimbot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """认领历史机器人：
+
+    - 带 token 参数：直接按 token 认领
+    - 无参数：列出未认领机器人，提供按钮回调认领
+    """
     if not is_admin(update):
         return
     parts = (update.message.text or '').split(maxsplit=1)
@@ -82,6 +102,7 @@ async def claimbot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def claimbot_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理认领按钮回调：优先按 id，失败则回退按 token。"""
     if not is_admin(update):
         return
     query = update.callback_query
@@ -104,6 +125,7 @@ async def claimbot_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """分页列出当前管理员创建的所有机器人（区分在线/离线）。"""
     if not is_admin(update): return
     # 仅显示本人创建的机器人
     operator_id = update.effective_user.id
@@ -161,6 +183,7 @@ async def list_bots(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 修改频道机器人 play_url ---
 async def edit_play_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """进入编辑频道机器人 `play_url` 的流程：展示本人可操作的频道机器人列表。"""
     if not is_admin(update):
         return ConversationHandler.END
     operator_id = update.effective_user.id
@@ -178,6 +201,7 @@ async def edit_play_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def edit_play_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """选择某个频道机器人后，提示输入新的 `play_url`。"""
     if not is_admin(update):
         return ConversationHandler.END
     query = update.callback_query
@@ -194,6 +218,7 @@ async def edit_play_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def edit_play_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """接收并保存新的 `play_url`，并尝试热更新运行中的频道机器人配置。"""
     if not is_admin(update):
         return ConversationHandler.END
     token = context.user_data.get('edit_token')
@@ -225,6 +250,7 @@ async def edit_play_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 修改引导注册机器人的 registration_link ---
 async def edit_reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """进入编辑引导注册机器人 `registration_link` 的流程。"""
     if not is_admin(update):
         return ConversationHandler.END
     operator_id = update.effective_user.id
@@ -242,6 +268,7 @@ async def edit_reg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def edit_reg_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """选择某个引导注册机器人后，提示输入新的注册链接。"""
     if not is_admin(update):
         return ConversationHandler.END
     query = update.callback_query
@@ -258,6 +285,7 @@ async def edit_reg_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def edit_reg_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """接收并保存新的 `registration_link`，并尽量热更新运行中的引导机器人。"""
     if not is_admin(update):
         return ConversationHandler.END
     token = context.user_data.get('edit_reg_token')
@@ -289,6 +317,7 @@ async def edit_reg_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 强制触发一次发送 ---
 async def send_now_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """展示本人可用的频道机器人，准备触发立即发送。"""
     if not is_admin(update):
         return
     all_bots = database.get_active_bots(role=BOT_TYPE_CHANNEL)
@@ -302,6 +331,7 @@ async def send_now_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_now_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """执行立即发送：调用 `ChannelSupervisor.send_now` 强制触发一次发送。"""
     query = update.callback_query
     await query.answer()
     token = query.data.split('_', 1)[-1]
@@ -318,18 +348,21 @@ async def send_now_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 添加机器人流程 ---
 async def start_add_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """添加机器人流程入口：询问代理名称。"""
     if not is_admin(update): return ConversationHandler.END
     await update.message.reply_text("好的，我们来添加一个新机器人。\n请问这个代理的名称是？")
     return GETTING_AGENT_NAME
 
 
 async def get_agent_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """接收代理名称，继续询问 Bot Token。"""
     context.user_data['agent_name'] = update.message.text
     await update.message.reply_text("名称已收到。\n现在，请把新机器人的`Token`发给我。")
     return GETTING_BOT_TOKEN
 
 
 async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """校验并记录 Bot Token，进入类型选择。"""
     token = (update.message.text or "").strip()
     if ":" not in token or not token.split(":")[0].isdigit():
         await update.message.reply_text("Token格式似乎不正确，请重新发送。")
@@ -350,6 +383,7 @@ async def get_bot_token(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def get_bot_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """记录机器人类型：私聊引导或频道带单，并进入下一步。"""
     query = update.callback_query
     await query.answer()
 
@@ -368,6 +402,7 @@ async def get_bot_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def get_reg_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """接收引导注册用的注册链接，进入频道链接采集。"""
     context.user_data['reg_link'] = update.message.text
 
     # 私聊引导注册类型需要频道链接
@@ -376,6 +411,7 @@ async def get_reg_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def get_channel_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """接收频道链接（或频道ID），分流到不同类型的后续步骤。"""
     channel_link = (update.message.text or "").strip()
     # 允许任意文本，后续由 axibot 进行规范化处理
     context.user_data['channel_link'] = channel_link
@@ -402,6 +438,7 @@ async def get_channel_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """接收频道机器人用的 `play_url`，频道类型直接保存并尝试启动。"""
     context.user_data['play_url'] = (update.message.text or "").strip()
 
     # 频道类型到此为止，不需要视频和图片
@@ -454,6 +491,7 @@ async def get_play_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def get_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """接收或跳过欢迎视频 URL，随后进入付款提示图片 URL 采集。"""
     # 处理回调查询（按钮点击）和文本消息两种情况
     if update.callback_query:
         query = update.callback_query
@@ -496,6 +534,7 @@ async def get_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """接收或跳过付款提示图片 URL，最终保存配置并动态启动对应机器人。"""
     # 处理回调查询（按钮点击）和文本消息两种情况
     image_url = None
 
@@ -558,6 +597,7 @@ async def get_image_url_and_save(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def cancel_add_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """取消添加流程，清理上下文。"""
     await update.message.reply_text("操作已取消。")
     context.user_data.clear()
     return ConversationHandler.END
@@ -605,6 +645,7 @@ edit_reg_handler = ConversationHandler(
 )
 # --- /catuser: 仅查看自己创建的私聊引导机器人引流人数 ---
 async def catuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """统计与分页展示本人创建的私聊引导机器人引流人数（去重）。"""
     if not is_admin(update):
         return
     operator_id = update.effective_user.id
@@ -652,6 +693,7 @@ async def catuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- 删除机器人流程 (保持不变) ---
 async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """删除机器人流程入口：分页展示本人可删除的机器人按钮。"""
     if not is_admin(update): return
     # 仅展示本人创建的机器人
     operator_id = update.effective_user.id
@@ -676,6 +718,7 @@ async def delete_bot_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """确认删除：展示不可逆警告并带有确认/取消按钮。"""
     query = update.callback_query
     await query.answer()
     bot_ref = query.data.split('_')[-1]
@@ -705,6 +748,7 @@ async def delete_bot_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """执行删除：先停止运行中的机器人，再从数据库清理。"""
     query = update.callback_query
     await query.answer()
     bot_ref = query.data.split('_')[-1]
@@ -746,6 +790,7 @@ async def delete_bot_execute(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def delete_bot_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """取消删除操作，恢复消息。"""
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("操作已取消。")

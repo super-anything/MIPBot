@@ -1,3 +1,13 @@
+"""afubot 运行期配置桥接
+
+从项目根 `settings.py` 引入所需配置项，统一暴露给 afubot 代码使用。
+- 数据库连接/后端设置
+- 管理员机器人 Token 与白名单
+- 资源库（首图/注册/存款教学等）
+
+注意：若关键配置缺失，将在 import 阶段抛出异常，尽早暴露配置问题。
+"""
+
 import settings as _S
 
 # 统一从根 settings 读取配置
@@ -19,7 +29,7 @@ IMAGE_LIBRARY = {
 }
 
 if not ADMIN_BOT_TOKEN:
-    raise ValueError("请在 .env 文件中设置你的 ADMIN_BOT_TOKEN")
+    raise ValueError("请在 .env 或 settings.py 中设置 ADMIN_BOT_TOKEN")
 
 if not ADMIN_USER_IDS:
     raise ValueError("请在 settings.py 中设置 ADMIN_USER_IDS 列表")

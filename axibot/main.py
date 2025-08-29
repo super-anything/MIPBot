@@ -1,3 +1,13 @@
+"""axibot 频道发送子系统
+
+职责：
+- 生成频道带单信号文本与倒计时提醒
+- 创建并管理单个频道发送 `Application`
+- 提供 `AxiBotManager` 以批量启动、监控、暂停/恢复与权限检查
+
+该模块也被 `afubot` 的 `ChannelSupervisor` 复用，以统一频道发送能力。
+"""
+
 import asyncio
 import logging
 import random
@@ -43,6 +53,7 @@ except Exception as e:
 
 
 def _normalize_channel_link(channel_link: str | None) -> str | None:
+    """归一化频道链接/ID：支持 -100 前缀 ID、@用户名、t.me 链接或原样返回。"""
     if not channel_link:
         return None
     text = channel_link.strip()
@@ -67,7 +78,7 @@ def _normalize_channel_link(channel_link: str | None) -> str | None:
 
 
 def generate_signal_message(bot_config: dict | None = None) -> str:
-    """生成一条（可按机器人配置定制的）信号消息"""
+    """生成一条（可按机器人配置定制的）信号消息。"""
     mines_count = random.randint(3, 6)
     attempts_count = random.randint(4, 8)
 
@@ -102,6 +113,7 @@ def generate_signal_message(bot_config: dict | None = None) -> str:
 
 
 async def _send_5_min_warning(context: ContextTypes.DEFAULT_TYPE):
+    """发送 5 分钟提醒，优先使用缓存的 sticker_file_id，失败尝试本地 .tgs 并回写。"""
     chat_id = context.bot_data['target_chat_id']
     bot_conf = context.bot_data.get('bot_config', {}) or {}
     sticker_id = bot_conf.get('sticker_file_id')
@@ -133,20 +145,23 @@ async def _send_5_min_warning(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _send_3_min_warning(context: ContextTypes.DEFAULT_TYPE):
+    """发送 3 分钟提醒。"""
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="💎💎💎 Only 3 minutes left 💎💎💎")
 
 
 async def _send_1_min_warning(context: ContextTypes.DEFAULT_TYPE):
+    """发送 1 分钟提醒。"""
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="💎💎💎 Only 1 minute left 💎💎💎")
 
 
 async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
+    """发送成功提示并解锁下一次发送；每 3 轮追加一次素材轮播。"""
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="✅ ✅ ✅ Mine-Clearing Successful! ✅ ✅ ✅")
     context.bot_data['is_signal_active'] = False
     logger.info(f"[{context.bot_data.get('agent_name')}] 信号已结束，锁已解除。")
     try:
         # 在解锁后，自动安排下一次发送，避免“仅首发一次就停止”的体验
-        delay = random.uniform(600, 800)
+        delay = random.uniform(600, 801)
         context.job_queue.run_once(_send_signal, when=delay)
         logger.info(f"[{context.bot_data.get('agent_name')}] 已计划在 {delay:.1f}s 后再次触发发送。")
     except Exception as e:
@@ -160,9 +175,15 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
         if rounds % 3 == 0:
             materials = getattr(config, 'OVER_MATERIALS', []) or []
             if materials:
-                idx = context.bot_data.get('over_material_index', 0)
-                mat = materials[idx % len(materials)]
+                # idx = context.bot_data.get('over_material_index', 0)
+                # mat = materials[idx % len(materials)]
+                bag = context.bot_data.get('over_materials_bag')
+                if not isinstance(bag, list) or not bag:
+                    bag = list(range(len(materials)))
+                    random.shuffle(bag)
 
+                idx = bag[-1]
+                mat = materials[idx]
                 image_url = mat.get('image_url')
                 caption = mat.get('caption')
 
@@ -183,12 +204,19 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
                         logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单图片失败: {e}")
 
                 # 三组素材按顺序轮换
-                context.bot_data['over_material_index'] = (idx + 1) % len(materials)
+                bag.pop()
+                context.bot_data['over_material_bag'] = idx
     except Exception as e:
         logger.warning(f"[{context.bot_data.get('agent_name')}] 带单素材发送流程出错: {e}")
 
 
 async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
+    """核心发送逻辑：
+
+    - 支持 `force` 强制发送（用于权限恢复或手动触发）
+    - 简化并发：基于 `is_signal_active` 加轻量陈旧锁清理
+    - 发送预告、图片（按次数轮换）、主信号文本与倒计时提醒
+    """
     # 支持强制发送：当权限刚恢复时即刻首发
     force = False
     try:
@@ -285,6 +313,7 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _schedule_checker(context: ContextTypes.DEFAULT_TYPE):
+    """概率调度器：每分钟检查一次，并按时间间隔调整触发概率。"""
     # 如果机器人被暂停，则跳过发送
     if context.bot_data.get('paused', False):
         return
@@ -311,9 +340,18 @@ async def _schedule_checker(context: ContextTypes.DEFAULT_TYPE):
 # HTTP 请求处理器在应用创建时按需实例化，避免跨线程/事件循环复用
 
 async def _create_and_start_app(bot_token: str, target_chat_id: str, bot_config: dict | None = None) -> Application:
+    """创建并启动一个用于频道发送的 `Application`。
+
+    - 在 `bot_data` 中设置目标频道、配置与运行状态
+    - 安排概率调度器与首次发送
+    """
     # 在当前事件循环中创建 HTTPXRequest，避免“bound to a different event loop”错误
     request = HTTPXRequest(connection_pool_size=100)
     app = ApplicationBuilder().token(bot_token).request(request).build()
+    # 仅日志的全局错误处理器
+    async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.exception("Unhandled exception in axibot app", exc_info=context.error)
+    app.add_error_handler(_on_error)
     app.bot_data['target_chat_id'] = target_chat_id
     app.bot_data['bot_config'] = bot_config or {}
     app.bot_data['agent_name'] = (bot_config or {}).get('agent_name', 'Agent')
@@ -359,7 +397,7 @@ class AxiBotManager:
         }
 
     async def start_bot(self, bot_config):
-        """启动一个频道机器人"""
+        """启动一个频道机器人（若已运行则复用并进行权限检查）。"""
         token = bot_config.get('bot_token')
         channel = _normalize_channel_link(bot_config.get('channel_link'))
 
@@ -393,7 +431,7 @@ class AxiBotManager:
             return None
 
     async def stop_bot(self, token):
-        """停止一个频道机器人"""
+        """停止一个频道机器人并清理计划任务。"""
         if token not in self.running_bots:
             return
 
@@ -451,9 +489,8 @@ class AxiBotManager:
 
     async def check_bot_permissions(self, app, channel_id, bot_config=None):
         """检查机器人在频道中的权限（不发测试消息）。
-        逻辑：通过 get_chat_member 获取自身在该频道的权限；
-        - 若为管理员且 can_post_messages/能发帖 权限为真，则视为通过；
-        - 若为普通成员或无此权限，则视为失败。
+        - 管理员且有发帖/发言权限视为通过；否则计数并提示
+        - 当权限从异常恢复时，自动安排一次强制发送
         """
         token = app.bot.token
         agent_name = app.bot_data.get('agent_name')
@@ -526,14 +563,14 @@ class AxiBotManager:
             return False
 
     def _is_active_hour(self, token, current_hour):
-        """检查当前时间是否在机器人的活跃时间范围内"""
+        """检查当前时间是否在机器人的活跃时间范围内。"""
         active_hours = self.shared_resources["active_hours"].get(token)
         if not active_hours:  # 如果没有设置活跃时间，则默认全天活跃
             return True
         return current_hour in active_hours
 
     async def set_bot_active_hours(self, token, hours_list):
-        """设置机器人的活跃时间，hours_list是小时列表，如[9,10,11,12,13,14,15,16,17,18,19,20,21,22]"""
+        """设置活跃时间，如 [9,10,...,22]，并热更新到运行应用。"""
         self.shared_resources["active_hours"][token] = hours_list
         if token in self.running_bots:
             app = self.running_bots[token]
@@ -541,21 +578,21 @@ class AxiBotManager:
             logger.info(f"已设置机器人 {app.bot_data.get('agent_name')} 的活跃时间为 {hours_list}")
 
     async def pause_bot(self, token):
-        """暂停机器人，但不完全停止它"""
+        """暂停机器人（仅置标志，不停止应用）。"""
         if token in self.running_bots:
             app = self.running_bots[token]
             app.bot_data['paused'] = True
             logger.info(f"已暂停机器人 {app.bot_data.get('agent_name')}")
 
     async def resume_bot(self, token):
-        """恢复暂停的机器人"""
+        """恢复之前暂停的机器人。"""
         if token in self.running_bots:
             app = self.running_bots[token]
             app.bot_data['paused'] = False
             logger.info(f"已恢复机器人 {app.bot_data.get('agent_name')}")
 
     async def check_new_bots(self):
-        """检查是否有新的机器人配置，并根据时间表动态管理机器人"""
+        """从 afubot 数据库拉取频道机器人并做动态管理（启动/暂停/恢复/权限检查）。"""
         if afu_db is None:
             return
 
@@ -616,7 +653,7 @@ class AxiBotManager:
             logger.error(f"检查新机器人时出错: {e}")
 
     async def start_all_bots(self):
-        """启动所有活跃的频道机器人"""
+        """启动所有活跃的频道机器人（从 afubot 数据库获取）。"""
         if afu_db is None:
             raise RuntimeError("无法导入 afubot.bot.database，无法获取频道与机器人配置。")
 
@@ -635,7 +672,7 @@ class AxiBotManager:
             raise
 
     def start_monitor(self):
-        """启动后台监控线程，定期检查新机器人"""
+        """启动后台监控线程，定期检查新机器人与权限。"""
         self._stop_event.clear()
         self._monitor_thread = threading.Thread(target=self._monitor_task)
         self._monitor_thread.daemon = True
@@ -643,14 +680,14 @@ class AxiBotManager:
         logger.info("后台监控线程已启动，将定期检查新机器人")
 
     def stop_monitor(self):
-        """停止后台监控线程"""
+        """停止后台监控线程。"""
         if self._monitor_thread:
             self._stop_event.set()
             self._monitor_thread.join(timeout=2)
             logger.info("后台监控线程已停止")
 
     def _monitor_task(self):
-        """后台监控任务，定期检查新机器人和权限"""
+        """后台监控任务：在独立事件循环中定期调度 `check_new_bots`。"""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -661,13 +698,14 @@ class AxiBotManager:
             time.sleep(1)
 
     async def shutdown_all(self):
-        """关闭所有运行中的机器人"""
+        """关闭所有运行中的机器人并停止监控。"""
         self.stop_monitor()
         for token in list(self.running_bots.keys()):
             await self.stop_bot(token)
 
 
 async def startup():
+    """Axibot 启动：从 afubot 数据库读取频道机器人，启动并进入监控。"""
     logger.info("Axibot 启动中（仅数据库模式）...")
 
     if afu_db is None:
@@ -682,6 +720,7 @@ async def startup():
 
 
 async def shutdown(manager: AxiBotManager):
+    """Axibot 优雅关闭：停止所有应用并结束。"""
     logger.info("正在关闭 Axibot...")
     await manager.shutdown_all()
     logger.info("所有机器人应用已关闭。")

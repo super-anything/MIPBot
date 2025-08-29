@@ -1,3 +1,14 @@
+"""频道发送极简管理器
+
+封装对频道型机器人的生命周期管理：
+- start(token, channel_link): 动态创建并启动发送应用（复用 axibot 的实现）
+- stop(token): 停止并清理计划任务与应用
+- send_now(token): 立即触发一次发送
+- update_config(token, **fields): 运行中热更新配置（如 play_url）
+
+目标：将频道发送能力与管理员后台解耦，由此项目统一管理。
+"""
+
 import asyncio
 import logging
 from typing import Dict
@@ -20,7 +31,11 @@ class ChannelSupervisor:
         self.running: Dict[str, Application] = {}  # token -> app
 
     async def start(self, bot_config: dict) -> Application | None:
-        """使用 axibot 的创建函数启动，从而带上 target_chat_id 和调度器。"""
+        """启动一个频道发送应用（如已存在则复用）。
+
+        复用 axibot 的 `_create_and_start_app` 以保持行为一致，并在启动后
+        主动触发一次首发，确保“新增即有输出”。
+        """
         token = bot_config.get('bot_token')
         if not token:
             return None
@@ -55,6 +70,7 @@ class ChannelSupervisor:
             return None
 
     async def stop(self, token: str):
+        """停止并清理某个频道发送应用，包含移除所有计划任务。"""
         app = self.running.get(token)
         if not app:
             return
@@ -82,6 +98,7 @@ class ChannelSupervisor:
             logger.info("ChannelSupervisor: stopped %s", token)
 
     async def send_now(self, token: str, text: str | None = None) -> bool:
+        """强制在对应频道立即触发一次发送。"""
         app = self.running.get(token)
         if not app:
             return False
@@ -107,7 +124,7 @@ class ChannelSupervisor:
             return False
 
     async def update_config(self, token: str, **fields) -> bool:
-        """热更新运行中机器人的配置（例如 play_url）。"""
+        """热更新运行中机器人的配置（例如 `play_url`）。"""
         app = self.running.get(token)
         if not app:
             return False
