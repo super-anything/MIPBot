@@ -50,7 +50,7 @@ OVER_MATERIALS = [
         ),
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over3.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/over3new.jpg",
         "caption": (
             "💸 Best proof yaar, jab paisa actually tere haath mein hota hai 🙌\n"
             "❌ No fake promises, only asli results ✅\n"
@@ -69,7 +69,7 @@ OVER_MATERIALS = [
         ),
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over5.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/over5new.jpg",
         "caption": (
             "✨ Better than any shabd are numbers aur screenshots 📸\n"
            " 💸 Sirf kuch minute mein hi kama liya unbelievable paisa 💰\n"
@@ -78,7 +78,7 @@ OVER_MATERIALS = [
         )
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over6.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/over6new.jpg",
         "caption": (
             "🌅 Every morning ek naya chance hai tumhe ek fresh insaan ban’ne ka.\n"
             "Jab dusre log so rahe hote hain 😴 ya complain karte hain 😒 — tum action le sakte ho aur jo tumhara hai wo le sakte ho 💪.\n"
@@ -87,7 +87,7 @@ OVER_MATERIALS = [
         )
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over7.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/over7new.jpg",
         "caption": (
             "Thode hi log jaante hain 🤫: predictor har second mein hundreds of data points analyze karta hai 📊, taaki tumhe peak dikhaye before it flies 🚀.\n"
             "Ye kismat nahi hai 🍀 — ye AI hai jo tumhare liye kaam kar rahi hai 🤖.\n"
@@ -95,7 +95,7 @@ OVER_MATERIALS = [
         )
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over8.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/over8new.jpg",
         "caption": (
             "Sab log kehte hain ki ye impossible hai 😏.\n"
             "Lekin jab kuch log sirf baatein karte hain 🗣 — dusre log sirf kuch minute mein cash out kar lete hain 💸.\n"
@@ -104,7 +104,7 @@ OVER_MATERIALS = [
         )
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over9.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/over9new.jpg",
         "caption": (
             "🔥🔥 Dekho yaar, mere student ne mera personal mentoring leke kya zabardast result nikala hai 💯!\n"
             "Bas tumhe new cheezon se darrna band karna hai 😎, thoda risk lena start karo 🚀.\n"
