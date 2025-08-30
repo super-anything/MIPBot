@@ -42,7 +42,7 @@ OVER_MATERIALS = [
         ),
     },
     {
-        "image_url": "https://storage.googleapis.com/axibot/dan/over2.jpg",
+        "image_url": "https://storage.googleapis.com/axibot/dan/voervideo1.mp4",
         "caption": (
             "⏰ The clock is ticking — money loves speed.\n"
             "While you’re doubting, someone else is starting the engine of their dream. — want the same?\n"

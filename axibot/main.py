@@ -17,7 +17,7 @@ import time
 import threading
 import datetime
 from urllib.parse import urlparse
-from params import tgs_file
+from params import tgs_file,image_file
 from telegram.ext import Application, ContextTypes, ApplicationBuilder
 from telegram.error import Forbidden, BadRequest
 from telegram.request import HTTPXRequest
@@ -142,16 +142,21 @@ async def _send_5_min_warning(context: ContextTypes.DEFAULT_TYPE):
                     context.bot_data['bot_config'] = bot_conf
         except Exception:
             pass
+
     await context.bot.send_message(chat_id=chat_id, text="💎💎💎 Only 5 minutes left 💎💎💎")
 
 
 async def _send_3_min_warning(context: ContextTypes.DEFAULT_TYPE):
     """发送 3 分钟提醒。"""
+
+    await image_file(context,'gogogo')
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="💎💎💎 Only 3 minutes left 💎💎💎")
 
 
 async def _send_1_min_warning(context: ContextTypes.DEFAULT_TYPE):
     """发送 1 分钟提醒。"""
+
+    await tgs_file(context,'boom')
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="💎💎💎 Only 1 minute left 💎💎💎")
 
 
@@ -165,7 +170,7 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"[{context.bot_data.get('agent_name')}] 信号已结束，锁已解除。")
     try:
         # 在解锁后，自动安排下一次发送，避免“仅首发一次就停止”的体验
-        delay = random.uniform(600, 800)
+        delay = random.uniform(6, 8)
         context.job_queue.run_once(_send_signal, when=delay)
         logger.info(f"[{context.bot_data.get('agent_name')}] 已计划在 {delay:.1f}s 后再次触发发送。")
     except Exception as e:
@@ -349,7 +354,8 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         try:
             pretext = "📶 Signal detect ho gaya 🚥"
             await context.bot.send_message(chat_id=target_chat, text=pretext)
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
+            await tgs_file(context, 'shejian')
         except Exception:
             pass
 
@@ -394,9 +400,9 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         job_queue = context.job_queue
         # 恢复完整倒计时提醒
         job_queue.run_once(_send_5_min_warning, 3)
-        job_queue.run_once(_send_3_min_warning, 120)  #生产为120
-        job_queue.run_once(_send_1_min_warning, 240) #生产为240
-        job_queue.run_once(_send_success_and_unlock, 300) #生产为300
+        job_queue.run_once(_send_3_min_warning, 12)  #生产为120
+        job_queue.run_once(_send_1_min_warning, 24) #生产为240
+        job_queue.run_once(_send_success_and_unlock, 30) #生产为300
     except Exception as e:
         logger.error(f"[{context.bot_data.get('agent_name')}] 发送信号失败: {e}")
         context.bot_data['is_signal_active'] = False
