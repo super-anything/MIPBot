@@ -59,6 +59,9 @@ IMAGE_LIBRARY = {
         "https://storage.googleapis.com/axibot/fbot/firstpng.jpg"
     ],
     'firstdd': [
-        "https://storage.googleapis.com/axibot/dan/first/firstnew.jpg"  #每三轮一次开始的图片
+        "https://storage.googleapis.com/axibot/dan/first/firstnew.jpg"  #每二轮一次开始的图片
+    ],
+    'overtgs': [
+        'https://storage.googleapis.com/axibot/dan/tgs/dogwin.tgs'#结尾动画
     ]
 }

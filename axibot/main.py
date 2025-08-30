@@ -17,6 +17,7 @@ import time
 import threading
 import datetime
 from urllib.parse import urlparse
+from params import tgs_file
 from telegram.ext import Application, ContextTypes, ApplicationBuilder
 from telegram.error import Forbidden, BadRequest
 from telegram.request import HTTPXRequest
@@ -157,17 +158,20 @@ async def _send_1_min_warning(context: ContextTypes.DEFAULT_TYPE):
 async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
     """发送成功提示并解锁下一次发送；每 3 轮追加一次素材轮播。"""
     await context.bot.send_message(chat_id=context.bot_data['target_chat_id'], text="✅ ✅ ✅ Mine-Clearing Successful! ✅ ✅ ✅")
+    await tgs_file(context,"dogwin")
+
+
     context.bot_data['is_signal_active'] = False
     logger.info(f"[{context.bot_data.get('agent_name')}] 信号已结束，锁已解除。")
     try:
         # 在解锁后，自动安排下一次发送，避免“仅首发一次就停止”的体验
-        delay = random.uniform(600, 801)
+        delay = random.uniform(600, 800)
         context.job_queue.run_once(_send_signal, when=delay)
         logger.info(f"[{context.bot_data.get('agent_name')}] 已计划在 {delay:.1f}s 后再次触发发送。")
     except Exception as e:
         logger.warning(f"[{context.bot_data.get('agent_name')}] 计划再次触发发送失败: {e}")
 
-    # --- 累计轮次：每完成 3 轮后发送一次带单素材（共 12轮覆盖四条） ---
+    # --- 累计轮次：每完成 2 轮后发送一次带单素材（共 12轮覆盖四条） ---
     try:
         rounds = context.bot_data.get('rounds_completed', 0) + 1
         context.bot_data['rounds_completed'] = rounds
@@ -177,35 +181,122 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
             if materials:
                 # idx = context.bot_data.get('over_material_index', 0)
                 # mat = materials[idx % len(materials)]
-                bag = context.bot_data.get('over_materials_bag')
+                bag = context.bot_data.get('over_material_bag')
                 if not isinstance(bag, list) or not bag:
                     bag = list(range(len(materials)))
                     random.shuffle(bag)
 
                 idx = bag[-1]
                 mat = materials[idx]
-                image_url = mat.get('image_url')
-                caption = mat.get('caption')
-
-                image_file_ids = context.bot_data.get('image_file_ids', {})
-                if image_url in image_file_ids:
-                    fid = image_file_ids[image_url]
-                    try:
-                        await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=fid, caption=caption)
-                    except Exception as e:
-                        logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单缓存图片失败: {e}")
-                else:
-                    try:
-                        msg = await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=image_url, caption=caption)
-                        if getattr(msg, 'photo', None):
-                            image_file_ids[image_url] = msg.photo[-1].file_id
-                            context.bot_data['image_file_ids'] = image_file_ids
-                    except Exception as e:
-                        logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单图片失败: {e}")
+                # image_url = mat.get('image_url')
+                # caption = mat.get('caption')
+                #
+                # image_file_ids = context.bot_data.get('image_file_ids', {})
+                # if image_url in image_file_ids:
+                #     fid = image_file_ids[image_url]
+                #     try:
+                #         await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=fid, caption=caption)
+                #     except Exception as e:
+                #         logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单缓存图片失败: {e}")
+                # else:
+                #     try:
+                #         msg = await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=image_url, caption=caption)
+                #         if getattr(msg, 'photo', None):
+                #             image_file_ids[image_url] = msg.photo[-1].file_id
+                #             context.bot_data['image_file_ids'] = image_file_ids
+                #     except Exception as e:
+                #         logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单图片失败: {e}")
 
                 # 三组素材按顺序轮换
+                u = (mat.get('image_url') or '').strip()
+                caption = mat.get('caption')
+
+                # 简单按后缀判断类型（去掉查询串并转小写）
+                base = u.split('?', 1)[0].lower()
+                is_tgs = base.endswith('.tgs')
+                is_gif = base.endswith('.gif')
+                is_video = base.endswith(('.mp4', '.mov', '.m4v', '.webm'))  # 建议优先 mp4
+
+                if is_tgs:
+                    # Telegram 动态贴纸（.tgs）用 send_sticker；不支持 caption，如需文案可单独再发
+                    sticker_cache = context.bot_data.get('sticker_file_ids', {})
+                    cached = sticker_cache.get(u) or ((context.bot_data.get('bot_config') or {}).get('sticker_file_id'))
+                    if cached:
+                        await context.bot.send_sticker(chat_id=context.bot_data['target_chat_id'], sticker=cached)
+                    else:
+                        msg = await context.bot.send_sticker(chat_id=context.bot_data['target_chat_id'], sticker=u)
+                        try:
+                            fid = getattr(getattr(msg, 'sticker', None), 'file_id', None)
+                            if fid:
+                                sticker_cache[u] = fid
+                                context.bot_data['sticker_file_ids'] = sticker_cache
+                                try:
+                                    if afu_db:
+                                        afu_db.update_bot_file_ids((context.bot_data.get('bot_config') or {}).get('bot_token'), sticker_file_id=fid)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+
+                elif is_gif:
+                    # GIF 用 send_animation；单独维护动画缓存，避免与图片/视频混用
+                    anim_cache = context.bot_data.get('animation_file_ids', {})
+                    cached = anim_cache.get(u)
+                    if cached:
+                        msg = await context.bot.send_animation(chat_id=context.bot_data['target_chat_id'],
+                                                               animation=cached, caption=caption)
+                    else:
+                        msg = await context.bot.send_animation(chat_id=context.bot_data['target_chat_id'], animation=u,
+                                                               caption=caption)
+                        try:
+                            fid = getattr(getattr(msg, 'animation', None), 'file_id', None)
+                            if fid:
+                                anim_cache[u] = fid
+                                context.bot_data['animation_file_ids'] = anim_cache
+                        except Exception:
+                            pass
+
+                elif is_video:
+                    # 视频用 send_video；单独维护视频缓存
+                    video_cache = context.bot_data.get('video_file_ids', {})
+                    cached = video_cache.get(u)
+                    if cached:
+                        msg = await context.bot.send_video(chat_id=context.bot_data['target_chat_id'], video=cached,
+                                                           caption=caption)
+                    else:
+                        msg = await context.bot.send_video(chat_id=context.bot_data['target_chat_id'], video=u,
+                                                           caption=caption)
+                        try:
+                            fid = getattr(getattr(msg, 'video', None), 'file_id', None)
+                            if fid:
+                                video_cache[u] = fid
+                                context.bot_data['video_file_ids'] = video_cache
+                        except Exception:
+                            pass
+
+                else:
+                    # 仍按图片发送（复用你现有的图片缓存逻辑）
+                    image_file_ids = context.bot_data.get('image_file_ids', {})
+                    if u in image_file_ids:
+                        fid = image_file_ids[u]
+                        try:
+                            await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=fid,
+                                                         caption=caption)
+                        except Exception as e:
+                            logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单缓存图片失败: {e}")
+                    else:
+                        try:
+                            msg = await context.bot.send_photo(chat_id=context.bot_data['target_chat_id'], photo=u,
+                                                               caption=caption)
+                            if getattr(msg, 'photo', None):
+                                image_file_ids[u] = msg.photo[-1].file_id
+                                context.bot_data['image_file_ids'] = image_file_ids
+                        except Exception as e:
+                            logger.warning(f"[{context.bot_data.get('agent_name')}] 发送带单图片失败: {e}")
+
+                # 成功发送后再消费洗牌袋（保持你原有两行）
                 bag.pop()
-                context.bot_data['over_material_bag'] = idx
+                context.bot_data['over_material_bag'] = bag
     except Exception as e:
         logger.warning(f"[{context.bot_data.get('agent_name')}] 带单素材发送流程出错: {e}")
 
@@ -306,7 +397,6 @@ async def _send_signal(context: ContextTypes.DEFAULT_TYPE):
         job_queue.run_once(_send_3_min_warning, 120)  #生产为120
         job_queue.run_once(_send_1_min_warning, 240) #生产为240
         job_queue.run_once(_send_success_and_unlock, 300) #生产为300
-
     except Exception as e:
         logger.error(f"[{context.bot_data.get('agent_name')}] 发送信号失败: {e}")
         context.bot_data['is_signal_active'] = False

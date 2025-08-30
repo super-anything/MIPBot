@@ -93,6 +93,18 @@ def initialize_db():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """
         )
+        # --- 媒体 file_id 映射表（KV：bot_token + media_key -> file_id） ---
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_media_file_ids (
+                bot_token VARCHAR(255) NOT NULL,
+                media_key VARCHAR(191) NOT NULL,
+                file_id TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_token, media_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """
+        )
         # 兼容旧表：若缺少 play_url 列则补充
         try:
             cursor.execute(
@@ -178,6 +190,18 @@ def initialize_db():
                 payload_json TEXT,
                 updated_at TEXT DEFAULT (datetime('now')),
                 PRIMARY KEY (bot_token, chat_id)
+            );
+            """
+        )
+        # 媒体 file_id 映射表（KV）
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_media_file_ids (
+                bot_token TEXT NOT NULL,
+                media_key TEXT NOT NULL,
+                file_id TEXT NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (bot_token, media_key)
             );
             """
         )
@@ -441,6 +465,83 @@ def update_registration_link(token: str, registration_link: str) -> bool:
         else:
             cursor = conn.cursor()
             cursor.execute("UPDATE bots SET registration_link = ? WHERE bot_token = ?", (registration_link, token))
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+# --- 通用媒体 file_id 映射：CRUD ---
+def get_media_file_id(bot_token: str, media_key: str) -> str | None:
+    """读取某个机器人指定 media_key 的 file_id。无则返回 None。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT file_id FROM bot_media_file_ids WHERE bot_token = %s AND media_key = %s",
+                    (bot_token, media_key),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return row["file_id"] if isinstance(row, dict) else row[0]
+        else:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT file_id FROM bot_media_file_ids WHERE bot_token = ? AND media_key = ?",
+                (bot_token, media_key),
+            )
+            row = cursor.fetchone()
+            return (row[0] if row else None)
+    finally:
+        conn.close()
+
+
+def upsert_media_file_id(bot_token: str, media_key: str, file_id: str) -> bool:
+    """写入或更新某个 media_key 的 file_id。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO bot_media_file_ids (bot_token, media_key, file_id) VALUES (%s,%s,%s) "
+                    "ON DUPLICATE KEY UPDATE file_id = VALUES(file_id)",
+                    (bot_token, media_key, file_id),
+                )
+                conn.commit()
+                return True
+        else:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO bot_media_file_ids (bot_token, media_key, file_id) VALUES (?,?,?) "
+                "ON CONFLICT(bot_token, media_key) DO UPDATE SET file_id = excluded.file_id",
+                (bot_token, media_key, file_id),
+            )
+            conn.commit()
+            return True
+    finally:
+        conn.close()
+
+
+def delete_media_file_id(bot_token: str, media_key: str) -> bool:
+    """删除指定 media_key 的映射。"""
+    conn = get_db_connection()
+    try:
+        if DB_BACKEND == "mysql":
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM bot_media_file_ids WHERE bot_token = %s AND media_key = %s",
+                    (bot_token, media_key),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        else:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM bot_media_file_ids WHERE bot_token = ? AND media_key = ?",
+                (bot_token, media_key),
+            )
             conn.commit()
             return cursor.rowcount > 0
     finally:
