@@ -110,6 +110,33 @@ OVER_MATERIALS = [
             "Bas tumhe new cheezon se darrna band karna hai 😎, thoda risk lena start karo 🚀.\n"
             "Tum sab bhi kar sakte ho, aur mere saath ho toh bilkul safe ho 👍."
         )
+    },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over10.MP4",
+        "caption": (
+            "🌞 Good day, mere bhai log jo jaldi hi financial freedom lene wale hain!Wish you happy vibes everyday! 🚀🙌\n"
+            "Agar tum sochte ho ki life change karna bohot mushkil hai aur bohot time lagta hai,toh main bolta hoon – bilkul galat soch hai! 😏\n"
+            "Main tumhe sab tools aur strategies dunga jo tumhe successful aur rich banaenge! 💸👨‍💻 Strategy follow karo, aur abhi start karo earning ➡️"
+        )
+    },
+    {
+        "image_url": "https://storage.googleapis.com/axibot/dan/over11.jpg",
+        "caption": (
+            "Mines Strategy — Incremental Betting (Add-on Play)\n"
+            "1 Fixed Starting Point\n"
+            "Starting bet = 2%–3% of total fund.\n"
+            "Example: Agar fund 1000 hai toh har game start karo 20–30 rupees se.\n"
+            "2 Add-on Rule\n"
+            "Win hua -> thoda sa badao (like +20% bet).\n"
+            "20 -> 24 -> 30 ...\n"
+            "Is tarah profit se profit banega aur agar streak chali toh growth tez hogi.\n"
+            "Example:\n"
+            "Fund = 1000 start bet = 20 (2%)\n"
+            "Game 1: Bet 20 ✅ win -> next bet 24\n"
+            "Game 2: Bet 24 ✅ win -> next bet 30\n"
+            "Summary:\n"
+            "Follow the strategy — Add-on Play."
+        )
     }
 ]
 

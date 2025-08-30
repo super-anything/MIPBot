@@ -172,7 +172,7 @@ async def _send_success_and_unlock(context: ContextTypes.DEFAULT_TYPE):
         rounds = context.bot_data.get('rounds_completed', 0) + 1
         context.bot_data['rounds_completed'] = rounds
 
-        if rounds % 3 == 0:
+        if rounds % 2 == 0:
             materials = getattr(config, 'OVER_MATERIALS', []) or []
             if materials:
                 # idx = context.bot_data.get('over_material_index', 0)

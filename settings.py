@@ -59,6 +59,6 @@ IMAGE_LIBRARY = {
         "https://storage.googleapis.com/axibot/fbot/firstpng.jpg"
     ],
     'firstdd': [
-        "https://storage.googleapis.com/axibot/axidaidan1.jpg"
+        "https://storage.googleapis.com/axibot/dan/first/firstnew.jpg"  #每三轮一次开始的图片
     ]
 }
